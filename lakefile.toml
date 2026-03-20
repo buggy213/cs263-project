@@ -1,0 +1,10 @@
+name = "cs263-project"
+version = "0.1.0"
+defaultTargets = ["cs263-project"]
+
+[[lean_lib]]
+name = "Cs263Project"
+
+[[lean_exe]]
+name = "cs263-project"
+root = "Main"
