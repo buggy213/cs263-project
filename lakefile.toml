@@ -8,3 +8,8 @@ name = "Cs263Project"
 [[lean_exe]]
 name = "cs263-project"
 root = "Main"
+
+[[require]]
+name = "aesop"
+scope = "leanprover-community"
+rev = "f642a64c76df8ba9cb53dba3b919425a0c2aeaf1"

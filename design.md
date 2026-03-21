@@ -54,7 +54,7 @@ The transformation we are interested in (a very simplified version of LuisaCompu
 
   Inputs to the coroutine transformation are `ProgramExt`
 2. We augment the original small-step semantics with a new rule: `(Suspend :: rest, trace) ⇒ (rest, trace)`
-  Effectively, this represents straight-line semantics that just plow through `Suspend`s by treating them as no-ops
+  Effectively, this represents **straight-line semantics** that just plow through `Suspend`s by treating them as no-ops
 3. We define new types `StmtCo`, `StateCo`, `ProgramCo` for result of coroutine transformation; all `Suspend` have been ripped out and replaced with `Yield`.
   ```lean
   inductive StmtCo (n: ℕ) (k: ℕ) : Type where
