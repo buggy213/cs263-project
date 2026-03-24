@@ -119,15 +119,7 @@ def splitStmt (stmt: @StmtExt n) (cont: List (@StmtCo n k)) (subr_index: ℕ) (h
     let unrolled_subrs := List.map (fun subr ↦ subr ++ transformed_body ++ cont) new_subrs
     ⟨
       (StmtCo.Loop cond transformed_body, unrolled_subrs, new_subr_index),
-      by
-        simp
-        simp at hindex
-        simp at hlen
-        simp [countSuspendsStmt]
-        constructor
-        . assumption
-        . subst hindex
-          simp_all only [List.append_assoc, List.length_map, unrolled_subrs]
+      by simp_all [countSuspendsStmt, unrolled_subrs]
     ⟩
   | .Suspend =>
     ⟨
@@ -139,14 +131,7 @@ def splitStmt (stmt: @StmtExt n) (cont: List (@StmtCo n k)) (subr_index: ℕ) (h
       splitListList cases cont subr_index (by simp [countSuspendsStmt] at hbound; assumption)
     ⟨
       (StmtCo.Switch num_cases cond transformed_cases, new_subrs, new_subr_index),
-      by
-        simp
-        simp at hindex
-        simp at hlen
-        simp [countSuspendsStmt]
-        constructor
-        . assumption
-        . assumption
+      by simp_all [countSuspendsStmt]
     ⟩
 
 -- splitList turns a list of statements (StmtExt) + the (already transformed) continuation of what comes
@@ -167,13 +152,7 @@ def splitList (stmts: List (@StmtExt n)) (cont: List (@StmtCo n k)) (subr_index:
     ⟨
       (transformed_stmt :: transformed_stmts_tail, new_subrs_tail ++ new_subrs, new_subr_index),
       by
-        simp
-        simp at hindex_tail
-        simp at hindex_head
-        simp at hlen_tail
-        simp at hlen_head
-        rw [hindex_head, hindex_tail]
-        rw [countSuspendsList]
+        simp_all [countSuspendsList]
         constructor
         . ac_rfl
         . omega
@@ -197,20 +176,13 @@ def splitListList (stmts: List (List (@StmtExt n))) (cont: List (@StmtCo n k)) (
     ⟨
       (transformed_stmts :: transformed_stmts_tail, new_subrs_tail ++ new_subrs, new_subr_index),
       by
-        simp
-        simp at hindex_head
-        simp at hindex_tail
-        simp at hlen_head
-        simp at hlen_tail
-        rw [hindex_head, hindex_tail]
-        rw [countSuspendsListList]
+        simp_all [countSuspendsListList]
         constructor
         . ac_rfl
         . omega
     ⟩
 
 end
-
 
 def split (orig: @ProgramExt n) : @ProgramCo n (countSuspends orig + 1) :=
   let k := countSuspends orig + 1
