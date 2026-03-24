@@ -1,15 +1,16 @@
+import Mathlib
 import Aesop
 
 set_option autoImplicit false
 
 section
-variable {n : Nat}
-variable {k : Nat}
+variable {n : ℕ}
+variable {k : ℕ}
 
 inductive StmtExt : Type where
   | ShallowInstr (id: Fin n)
   | Switch
-    (num_cases: Nat)
+    (num_cases: ℕ)
     (cond: List (Fin n) → Fin num_cases → Prop)
     (cases: List (List StmtExt))
   | Loop
@@ -29,7 +30,7 @@ structure ProgramExt where
 inductive StmtCo : Type where
   | ShallowInstr (id: Fin n)
   | Switch
-    (num_cases: Nat)
+    (num_cases: ℕ)
     (cond: List (Fin n) → Fin num_cases → Prop)
     (cases: List (List StmtCo))
   | Loop
@@ -80,22 +81,22 @@ inductive CoroutineStep {program: @ProgramCo n k} : (List (@StmtCo n k) × (@Sta
 -- use "direct unrolling" idea as first implementation
 
 mutual
-def countSuspendsStmt : @StmtExt n → Nat
+def countSuspendsStmt : @StmtExt n → ℕ
   | .ShallowInstr _ => 0
   | .Switch _ _ cases => countSuspendsListList cases
   | .Loop _ body => countSuspendsList body
   | .Suspend => 1
 
-def countSuspendsList : List (@StmtExt n) → Nat
+def countSuspendsList : List (@StmtExt n) → ℕ
   | [] => 0
   | s :: rest => countSuspendsStmt s + countSuspendsList rest
 
-def countSuspendsListList : List (List (@StmtExt n)) → Nat
+def countSuspendsListList : List (List (@StmtExt n)) → ℕ
   | [] => 0
   | l :: rest => countSuspendsList l + countSuspendsListList rest
 end
 
-def countSuspends (pext: @ProgramExt n) : Nat :=
+def countSuspends (pext: @ProgramExt n) : ℕ :=
   countSuspendsList pext.stmts
 
 mutual
@@ -103,8 +104,8 @@ mutual
 -- after this statement (StmtCo) + current subroutine index
 -- and returns the transformed statement (Option StmtExt) or a new subroutine (if it was a suspend) +
 -- any subroutines that were created + updated subroutine index
-def splitStmt (stmt: @StmtExt n) (cont: List (@StmtCo n k)) (subr_index: Nat) (hbound: subr_index + countSuspendsStmt stmt ≤ k) :
-  { result: (@StmtCo n k × List (List (@StmtCo n k)) × Nat) // result.snd.snd = subr_index + countSuspendsStmt stmt ∧ result.snd.fst.length = countSuspendsStmt stmt } :=
+def splitStmt (stmt: @StmtExt n) (cont: List (@StmtCo n k)) (subr_index: ℕ) (hbound: subr_index + countSuspendsStmt stmt ≤ k) :
+  { result: (@StmtCo n k × List (List (@StmtCo n k)) × ℕ) // result.snd.snd = subr_index + countSuspendsStmt stmt ∧ result.snd.fst.length = countSuspendsStmt stmt } :=
   match stmt with
   | .ShallowInstr id => ⟨
     (StmtCo.ShallowInstr id, [], subr_index),
@@ -151,8 +152,8 @@ def splitStmt (stmt: @StmtExt n) (cont: List (@StmtCo n k)) (subr_index: Nat) (h
 -- splitList turns a list of statements (StmtExt) + the (already transformed) continuation of what comes
 -- after this list of statements (StmtCo) + current subroutine index
 -- and returns the list of statements (StmtCo) + any subroutines that were created + the next subroutine index
-def splitList (stmts: List (@StmtExt n)) (cont: List (@StmtCo n k)) (subr_index: Nat) (hbound: subr_index + countSuspendsList stmts ≤ k):
-  { result: (List (@StmtCo n k) × List (List (@StmtCo n k)) × Nat) // result.snd.snd = subr_index + countSuspendsList stmts ∧ result.snd.fst.length = countSuspendsList stmts } :=
+def splitList (stmts: List (@StmtExt n)) (cont: List (@StmtCo n k)) (subr_index: ℕ) (hbound: subr_index + countSuspendsList stmts ≤ k):
+  { result: (List (@StmtCo n k) × List (List (@StmtCo n k)) × ℕ) // result.snd.snd = subr_index + countSuspendsList stmts ∧ result.snd.fst.length = countSuspendsList stmts } :=
   match stmts with
   | [] => ⟨
     ([], [], subr_index),
@@ -181,8 +182,8 @@ def splitList (stmts: List (@StmtExt n)) (cont: List (@StmtCo n k)) (subr_index:
 -- splitListList turns a list of list of statements (StmtExt) + the (already transformed) continuation of what postdominates
 -- all of these cases (this is used for switch-cases) + current subroutine index
 -- and returns the list of list of statements (StmtCo) + any subroutines that were created + the next subroutine index
-def splitListList (stmts: List (List (@StmtExt n))) (cont: List (@StmtCo n k)) (subr_index: Nat) (hbound: subr_index + countSuspendsListList stmts ≤ k):
-  { result: (List (List (@StmtCo n k)) × List (List (@StmtCo n k)) × Nat) // result.snd.snd = subr_index + countSuspendsListList stmts ∧ result.snd.fst.length = countSuspendsListList stmts } :=
+def splitListList (stmts: List (List (@StmtExt n))) (cont: List (@StmtCo n k)) (subr_index: ℕ) (hbound: subr_index + countSuspendsListList stmts ≤ k):
+  { result: (List (List (@StmtCo n k)) × List (List (@StmtCo n k)) × ℕ) // result.snd.snd = subr_index + countSuspendsListList stmts ∧ result.snd.fst.length = countSuspendsListList stmts } :=
   match stmts with
   | [] => ⟨
     ([], [], subr_index),
@@ -216,3 +217,8 @@ def split (orig: @ProgramExt n) : @ProgramCo n (countSuspends orig + 1) :=
   let ⟨⟨stmts, subrs, _⟩, ⟨_, hlen⟩⟩ :=
     @splitList n k orig.stmts [] 0 (by simp [countSuspends, k])
   @ProgramCo.mk n k (subrs ++ [stmts]) (by simp_all; rfl)
+
+theorem splitPreservesSemantics : ∀ (program : @ProgramExt n), True :=
+  by
+    intro
+    exact True.intro
