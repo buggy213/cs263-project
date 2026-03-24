@@ -77,7 +77,7 @@ inductive CoroutineStep {program: @ProgramCo n k} : (List (@StmtCo n k) × (@Sta
 | Yield (next: Option (Fin k)) rest state :
   CoroutineStep (StmtCo.Yield next :: rest, state) ([], state.setNext next)
 | Schedule trace next :
-  CoroutineStep ([], ⟨trace, Option.some next⟩) (program.subroutines[next]'(by have len := program.hsubr_count; rw [len]; simp), ⟨trace, Option.some next⟩)
+  CoroutineStep ([], ⟨trace, Option.some next⟩) (program.subroutines[next]'(by have len := program.hsubr_count; simp [len]), ⟨trace, Option.some next⟩)
 
 -- use "direct unrolling" idea as first implementation
 
@@ -157,7 +157,7 @@ def splitList (stmts: List (@StmtExt n)) (cont: List (@StmtCo n k)) (subr_index:
     let ⟨⟨transformed_stmts_tail, new_subrs_tail, new_subr_index_tail⟩, ⟨hindex_tail, hlen_tail⟩⟩ :=
       splitList tail cont subr_index (by simp [countSuspendsList] at hbound; omega)
     let ⟨⟨transformed_stmt, new_subrs, new_subr_index⟩, ⟨hindex_head, hlen_head⟩⟩ :=
-      splitStmt head (transformed_stmts_tail ++ cont) new_subr_index_tail (by simp at hindex_tail; rw [hindex_tail]; simp [countSuspendsList] at hbound; omega)
+      splitStmt head (transformed_stmts_tail ++ cont) new_subr_index_tail (by simp_all [countSuspendsList]; omega)
     ⟨
       (transformed_stmt :: transformed_stmts_tail, new_subrs_tail ++ new_subrs, new_subr_index),
       by
@@ -178,7 +178,7 @@ def splitListList (stmts: List (List (@StmtExt n))) (cont: List (@StmtCo n k)) (
     let ⟨⟨transformed_stmts_tail, new_subrs_tail, new_subr_index_tail⟩, ⟨hindex_tail, hlen_tail⟩⟩ :=
       splitListList tail cont subr_index (by simp [countSuspendsListList] at hbound; omega)
     let ⟨⟨transformed_stmts, new_subrs, new_subr_index⟩, ⟨hindex_head, hlen_head⟩⟩ :=
-      splitList head cont new_subr_index_tail (by simp at hindex_tail; rw [hindex_tail]; simp [countSuspendsListList] at hbound; omega)
+      splitList head cont new_subr_index_tail (by simp_all [countSuspendsListList]; omega)
     ⟨
       (transformed_stmts :: transformed_stmts_tail, new_subrs_tail ++ new_subrs, new_subr_index),
       by
