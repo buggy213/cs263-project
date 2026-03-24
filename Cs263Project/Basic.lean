@@ -49,6 +49,7 @@ def StateCo.setNext (self: @StateCo n k) (next: Option (Fin k)) : @StateCo n k :
   ⟨self.trace, next⟩
 
 structure ProgramCo where
+  main: List (@StmtCo n k)
   subroutines: List (List (@StmtCo n k))
   hsubr_count: subroutines.length = k
 
@@ -99,11 +100,22 @@ end
 def countSuspends (pext: @ProgramExt n) : ℕ :=
   countSuspendsList pext.stmts
 
+/-
+the general structure of the mutually recursive `split` functions is as follows
+arguments:
+  stmt/stmts - the yet unprocessed statement(s)
+  cont - the (already transformed) continuation of what comes after a given statement, or list of statements
+  subr_index - next subroutine index in final list of subroutines created by `split`
+  hbound: a proof that subr_index + countSuspends of stmt/stmts doesn't overflow the index set [k]
+returns:
+  tuple of 3 values
+    1. transformed statement / list of statements / list of list of statements
+    2. any created subroutines
+    3. updated subroutine index
+  proof that updated subroutine index = subr_index + countSuspends of stmt/stmts
+  proof that number of subroutines created = countSuspends of stmt/stmts
+-/
 mutual
--- splitStmt turns a single statement (StmtExt) + the (already transformed) continuation of what comes
--- after this statement (StmtCo) + current subroutine index
--- and returns the transformed statement (Option StmtExt) or a new subroutine (if it was a suspend) +
--- any subroutines that were created + updated subroutine index
 def splitStmt (stmt: @StmtExt n) (cont: List (@StmtCo n k)) (subr_index: ℕ) (hbound: subr_index + countSuspendsStmt stmt ≤ k) :
   { result: (@StmtCo n k × List (List (@StmtCo n k)) × ℕ) // result.snd.snd = subr_index + countSuspendsStmt stmt ∧ result.snd.fst.length = countSuspendsStmt stmt } :=
   match stmt with
@@ -134,9 +146,6 @@ def splitStmt (stmt: @StmtExt n) (cont: List (@StmtCo n k)) (subr_index: ℕ) (h
       by simp_all [countSuspendsStmt]
     ⟩
 
--- splitList turns a list of statements (StmtExt) + the (already transformed) continuation of what comes
--- after this list of statements (StmtCo) + current subroutine index
--- and returns the list of statements (StmtCo) + any subroutines that were created + the next subroutine index
 def splitList (stmts: List (@StmtExt n)) (cont: List (@StmtCo n k)) (subr_index: ℕ) (hbound: subr_index + countSuspendsList stmts ≤ k):
   { result: (List (@StmtCo n k) × List (List (@StmtCo n k)) × ℕ) // result.snd.snd = subr_index + countSuspendsList stmts ∧ result.snd.fst.length = countSuspendsList stmts } :=
   match stmts with
@@ -158,9 +167,6 @@ def splitList (stmts: List (@StmtExt n)) (cont: List (@StmtCo n k)) (subr_index:
         . omega
     ⟩
 
--- splitListList turns a list of list of statements (StmtExt) + the (already transformed) continuation of what postdominates
--- all of these cases (this is used for switch-cases) + current subroutine index
--- and returns the list of list of statements (StmtCo) + any subroutines that were created + the next subroutine index
 def splitListList (stmts: List (List (@StmtExt n))) (cont: List (@StmtCo n k)) (subr_index: ℕ) (hbound: subr_index + countSuspendsListList stmts ≤ k):
   { result: (List (List (@StmtCo n k)) × List (List (@StmtCo n k)) × ℕ) // result.snd.snd = subr_index + countSuspendsListList stmts ∧ result.snd.fst.length = countSuspendsListList stmts } :=
   match stmts with
@@ -184,11 +190,11 @@ def splitListList (stmts: List (List (@StmtExt n))) (cont: List (@StmtCo n k)) (
 
 end
 
-def split (orig: @ProgramExt n) : @ProgramCo n (countSuspends orig + 1) :=
-  let k := countSuspends orig + 1
+def split (orig: @ProgramExt n) : @ProgramCo n (countSuspends orig) :=
+  let k := countSuspends orig
   let ⟨⟨stmts, subrs, _⟩, ⟨_, hlen⟩⟩ :=
     @splitList n k orig.stmts [] 0 (by simp [countSuspends, k])
-  @ProgramCo.mk n k (subrs ++ [stmts]) (by simp_all; rfl)
+  @ProgramCo.mk n k stmts (subrs) (by simp_all; rfl)
 
 theorem splitPreservesSemantics : ∀ (program : @ProgramExt n), True :=
   by
