@@ -1,10 +1,11 @@
-# Program Representation
+# Implementation Details
+## Program Representation
 A program is represented as `n: ℕ` and `stmts: List (Stmt n))`, where `n` indicates how many unique non-control-flow instructions there are in the program.
 
-# Statement Representation
+## Statement Representation
 Statements are a representation of the LuisaCompute XIR which directly embed the fact that it only has _structured_ control flow. In particular, there are only three types of control flow that we need to worry about: conditionals, switch, and loop. Constructs like `break`, `return`, can all be mapped down to just these three.
 Note that actually doing this transformation isn't super efficient, it requires masking for instructions that shouldn't run and auxiliary flags to check whether that masking should apply. Also, the real `loop` construct in XIR is more like a `do-while`, but this is trivially equivalent (just unroll the body once).
-Since the control flow is _structured_, we can adopt a tree-like structure that hopefully makes proofs go through more easily, rather than directly trying to prove things about a linear IR. 
+Since the control flow is _structured_, we can adopt a tree-like structure that hopefully makes proofs go through more easily, rather than directly trying to prove things about a linear IR. Specifically, statements like `loop` will contain a `List Stmt` that represents their body. Since there is no arbitrary jumps, representing the CFG as an actual graph is not required.
 
 Everything except control flow statements is shallowly embedded as a `ShallowInstr (id: Fin n) : Stmt`. These represent basically everything else the real program would be allowed to do: modifying memory, doing IO, launching ray tracing operations, etc. The *state* of a program is represented by a trace of `id`s of `ShallowInstr`s that the program executed. In terms of the mapping from "real" program, you can create two `ShallowInstr` with the same `id`, as long as they are guaranteed to "do the same thing" under the same state. This is a bit hand-wavy, but restricting ourselves to this shallow embedding should make proofs much more tractable. 
 
@@ -22,7 +23,7 @@ structure Program where
   stmts: List (Stmt n)
 ```
 
-# Operational Semantics
+## Operational Semantics
 We can define the following small-step operational semantics for a program:
 1. `(ShallowInstr id :: rest, trace) ⇒ (rest, trace ++ [id])`
    `ShallowInstr` statement just appends its `id` into the state
@@ -34,12 +35,12 @@ We can define the following small-step operational semantics for a program:
    `Loop` statement is also allowed to terminate
 
 
-# Program Equivalence
+## Program Equivalence
 For the purposes of proving stuff, it's easiest to assume that the programs actually terminate, so theorems will have that assumption. Otherwise, you would need to consider set of all configurations reachable from initial configuration, which seems annoying. 
 
 For two programs `p1` and `p2` that have the same value of `n` and both terminate (so we have assumptions `p1_terminates: (p1, []) ⇒* ([], t1)` and `p2_terminates: (p2, []) ⇒* ([], t2)`), they are equivalent if `t1 = t2`. 
 
-# Coroutine Transformation
+## Coroutine Transformation
 The transformation we are interested in (a very simplified version of LuisaCompute's coroutine transformation passes) works as follows:
 1. We augment the original `Stmt` inductive type with a new variant named `Suspend`
   ```lean
