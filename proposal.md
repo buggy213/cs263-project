@@ -1,4 +1,5 @@
 [GitHub Repo](https://github.com/buggy213/cs263-project)
+[This proposal with pictures](https://github.com/buggy213/cs263-project/blob/master/proposal.md)
 
 # Software / Infrastructure
 Mainly I will just be using `lean4` + `Mathlib`. I don't think other infrastructure is needed for the class project.
