@@ -77,7 +77,7 @@ inductive CoroutineStep {program: @ProgramCo n k} : (List (@StmtCo n k) × (@Sta
 | Yield (next: Option (Fin k)) rest state :
   CoroutineStep (StmtCo.Yield next :: rest, state) ([], state.setNext next)
 | Schedule trace next :
-  CoroutineStep ([], ⟨trace, Option.some next⟩) (program.subroutines[next]'(by have len := program.hsubr_count; simp [len]), ⟨trace, Option.some next⟩)
+  CoroutineStep ([], ⟨trace, Option.some next⟩) (program.subroutines[next]'(by have len := program.hsubr_count; simp [len]), ⟨trace, .none⟩)
 
 -- use "direct unrolling" idea as first implementation
 
@@ -196,7 +196,21 @@ def split (orig: @ProgramExt n) : @ProgramCo n (countSuspends orig) :=
     @splitList n k orig.stmts [] 0 (by simp [countSuspends, k])
   @ProgramCo.mk n k stmts (subrs) (by simp_all; rfl)
 
-theorem splitPreservesSemantics : ∀ (program : @ProgramExt n), True :=
-  by
-    intro
-    exact True.intro
+def straight_line_rtc := Relation.ReflTransGen (@StraightLineStep n)
+def coroutine_rtc (program: @ProgramCo n k) := Relation.ReflTransGen (@CoroutineStep n k program)
+
+-- "for all straight-line programs that halt, the final state is equal to the split program run using coroutine semantics"
+theorem splitPreservesSemantics :
+  ∀ (program : @ProgramExt n) (final_state: List (Fin n)) (hhalts: straight_line_rtc (program.stmts, ⟨[]⟩) ([], ⟨final_state⟩)),
+  have split_program := (split program)
+  coroutine_rtc (split_program) (split_program.main, ⟨[], .none⟩) ([], ⟨final_state, .none⟩) := by
+
+  intro original_program final_state hhalts split_program
+
+  -- general proof idea
+  -- 1. until it hits the first suspend, the straight-line and coroutine executions do not diverge at all
+  -- 2. once the first suspend is hit, we want to show that the continuation is correct until the next suspend
+  sorry
+
+-- helper lemmas
+-- 1. both straight-line and coroutine semantics are deterministic
