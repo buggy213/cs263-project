@@ -196,21 +196,93 @@ def split (orig: @ProgramExt n) : @ProgramCo n (countSuspends orig) :=
     @splitList n k orig.stmts [] 0 (by simp [countSuspends, k])
   @ProgramCo.mk n k stmts (subrs) (by simp_all; rfl)
 
-def straight_line_rtc := Relation.ReflTransGen (@StraightLineStep n)
-def coroutine_rtc (program: @ProgramCo n k) := Relation.ReflTransGen (@CoroutineStep n k program)
+abbrev StraightLineRTC := Relation.ReflTransGen (@StraightLineStep n)
+abbrev CoroutineRTC (program: @ProgramCo n k) := Relation.ReflTransGen (@CoroutineStep n k program)
+
+infixr:100 " ⇒ " => StraightLineStep
+infixr:100 " ⇒* " => StraightLineRTC
+
+#check Relation.ReflTransGen.refl
 
 -- "for all straight-line programs that halt, the final state is equal to the split program run using coroutine semantics"
+-- include initial_state to reflect to model (external) inputs to program
 theorem splitPreservesSemantics :
-  ∀ (program : @ProgramExt n) (final_state: List (Fin n)) (hhalts: straight_line_rtc (program.stmts, ⟨[]⟩) ([], ⟨final_state⟩)),
+  ∀ (program : @ProgramExt n)
+    (initial_state: List (Fin n))
+    (final_state: List (Fin n))
+    (hhalts: (program.stmts, ⟨initial_state⟩) ⇒* ([], ⟨final_state⟩)),
   have split_program := (split program)
-  coroutine_rtc (split_program) (split_program.main, ⟨[], .none⟩) ([], ⟨final_state, .none⟩) := by
+  CoroutineRTC (split_program) (split_program.main, ⟨[], .none⟩) ([], ⟨final_state, .none⟩) := by
 
   intro original_program final_state hhalts split_program
 
-  -- general proof idea
-  -- 1. until it hits the first suspend, the straight-line and coroutine executions do not diverge at all
-  -- 2. once the first suspend is hit, we want to show that the continuation is correct until the next suspend
   sorry
 
 -- helper lemmas
--- 1. both straight-line and coroutine semantics are deterministic
+
+
+-- if the `List (@StmtCo n k)` created by `splitList` is executed with initial state `⟨initial_trace, .none⟩`, it completely matches
+-- the behavior of `List (@StmtExt n)` passed into `splitList` with initial state `⟨initial_trace, .none⟩`
+-- if `stmts` doesn't contain any suspends, this should basically be trivial
+
+lemma splitListSimulation
+  (stmts : List (@StmtExt n))
+  (cont : List (@StmtCo n k))
+  (subr_index : ℕ)
+  (hbound : subr_index + countSuspendsList stmts ≤ k)
+  (program : @ProgramCo n k)
+  {result : List (@StmtCo n k)}
+  {coros : List (List (@StmtCo n k))}
+  {new_subr_index : ℕ}
+  (h_split : (splitList stmts cont subr_index hbound).val = (result, coros, new_subr_index))
+  (h_subrs : program.subroutines.extract subr_index (countSuspendsList stmts) = coros)
+  (initial_trace final_trace : List (Fin n))
+  (hrun : (stmts, (⟨initial_trace⟩ : @State n)) ⇒* ([], ⟨final_trace⟩)) :
+  CoroutineRTC program
+    (result ++ cont, ⟨initial_trace, .none⟩)
+    (cont, ⟨final_trace, .none⟩) :=
+  by
+    cases hrun with
+    | refl =>
+      simp [splitList] at h_split
+      simp [h_split]
+      exact Relation.ReflTransGen.refl
+    | tail previous_steps final_step =>
+      rename_i final_step_config
+      sorry
+
+
+lemma splitStmtSimulation
+  (stmt: @StmtExt n)
+  (cont: List (@StmtCo n k))
+  (subr_index: ℕ)
+  (hbound: subr_index + countSuspendsStmt stmt ≤ k)
+
+  (program : @ProgramCo n k)
+  (h_subrs : Prop /- not sure how to express this? -/)
+  (initial_trace final_trace : List (Fin n))
+  (hrun : ([stmt], ⟨initial_trace⟩) ⇒* ([], ⟨final_trace⟩)) :
+  have ⟨⟨result, coros, _⟩, ⟨_, _⟩⟩ := splitStmt stmt cont subr_index hbound
+  CoroutineRTC program
+    ([result] ++ cont, ⟨initial_trace, .none⟩)
+    (cont, ⟨final_trace, .none⟩) :=
+  by
+    sorry
+
+lemma splitListListSimulation
+  (stmts: List (List (@StmtExt n)))
+  (cont: List (@StmtCo n k))
+  (subr_index: ℕ)
+  (hbound: subr_index + countSuspendsListList stmts ≤ k)
+
+  (program: @ProgramCo n k)
+  (h_subrs: Prop /- not sure how to express this? -/)
+  (initial_trace : List (Fin n))
+  (final_trace : List (Fin n))
+  (hruns : Prop) :
+  have ⟨⟨result, coros, _⟩, ⟨_, _⟩⟩ := splitListList stmts cont subr_index hbound
+  CoroutineRTC program
+    ([result] ++ cont, ⟨initial_trace, .none⟩)
+    (cont, ⟨final_trace, .none⟩) :=
+  by
+    sorry
