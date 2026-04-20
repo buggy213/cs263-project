@@ -263,7 +263,7 @@ lemma splitStmtSimulation
     (result, ⟨initial_state.trace⟩)
     ⟨final_state.trace⟩ :=
   by
-    induction hrun with
+    induction hrun generalizing stmt initial_state cont subr_index with
     | ShallowInstr id state =>
       obtain ⟨hstmt, hstate⟩ := hinitial_config
       subst stmt
@@ -295,29 +295,208 @@ lemma splitStmtSimulation
         result
         stmt_co
         subrs
-        subr_index
+        new_subr_index
         hindex
         hlen
         heq
 
+      simp [splitStmt] at heq
 
-      -- have stmt_co_is_sequence : stmt_co = StmtCo.Sequence head_stmt_co tail_stmt_co :=
-      --   by grind
-      -- rw [stmt_co_is_sequence]
+      split at heq
+      rename_i
+        tail_result
+        tail_stmt_co
+        tail_subrs
+        tail_subr_index
+        tail_hindex
+        tail_hlen
+        tail_heq
 
-      -- have tail_stmt_co_step :
-      --   @CoroutineStep n k program (tail_stmt_co, ⟨b.trace⟩) ⟨final_trace⟩ :=
-      --   by
-      --     sorry
+      split at heq
+      rename_i
+        head_result
+        head_stmt_co
+        head_subrs
+        head_subr_index
+        head_hindex
+        head_hlen
+        head_heq
 
-      -- have head_stmt_co_step :
-      --   @CoroutineStep n k program (head_stmt_co, ⟨initial_trace⟩) ⟨b.trace⟩ :=
-      --   by
-      --     sorry
+      simp_all
 
-      -- apply CoroutineStep.Sequence
-      --   head_stmt_co tail_stmt_co
-      --   ⟨initial_trace⟩ ⟨b.trace⟩ ⟨final_trace⟩
-      --   head_stmt_co_step tail_stmt_co_step
+      have stmt_co_is_sequence : stmt_co = StmtCo.Sequence head_stmt_co tail_stmt_co :=
+        by grind
+      rw [stmt_co_is_sequence]
 
-    | _ => sorry
+      have hB_app := hB_ih B cont subr_index (by simp [countSuspendsStmt] at hbound; omega) (by rfl)
+      split at hB_app
+      rename_i hB_heq
+      rename StmtCo => hB_stmt_co
+      have hB_stmt_co_is_tail_stmt_co : hB_stmt_co = tail_stmt_co := by aesop
+
+      have tail_stmt_co_step :
+        @CoroutineStep n k program (tail_stmt_co, ⟨b.trace⟩) ⟨c.trace⟩ :=
+        by aesop
+
+      have hA_app := hA_ih A (StmtCo.Sequence tail_stmt_co cont) tail_subr_index (by simp [countSuspendsStmt] at hbound; simp at tail_hindex; omega) (by rfl)
+      split at hA_app
+      rename_i hA_heq
+      rename StmtCo => hA_stmt_co
+      have hA_stmt_co_is_head_stmt_co : hA_stmt_co = head_stmt_co := by aesop
+
+
+      have head_stmt_co_step :
+        @CoroutineStep n k program (head_stmt_co, ⟨initial_state.trace⟩) ⟨b.trace⟩ :=
+        by aesop
+
+      apply CoroutineStep.Sequence
+        head_stmt_co tail_stmt_co
+        ⟨initial_state.trace⟩ ⟨b.trace⟩ ⟨c.trace⟩
+        head_stmt_co_step tail_stmt_co_step
+
+    | IfTrue cond then_body s t hcond hbody hbody_ih =>
+      simp_all
+      obtain ⟨hstmt, hstate⟩ := hinitial_config
+      clear s hstate final_state
+      rename' t => final_state
+      subst stmt
+
+      split
+      rename_i
+        result
+        head_stmt_co
+        head_subrs
+        head_subr_index
+        head_hindex
+        head_hlen
+        head_heq
+
+      simp at head_hlen head_hindex
+      simp [splitStmt] at head_heq
+      split at head_heq
+      rename_i
+        tail_result
+        tail_stmt_co
+        tail_subrs
+        tail_subr_index
+        tail_hindex
+        tail_hlen
+        tail_heq
+
+      have head_stmt_co_is_if : head_stmt_co = StmtCo.If cond tail_stmt_co := by aesop
+      subst head_stmt_co
+
+      apply CoroutineStep.IfTrue
+      . aesop
+      . have hbody_ih_app := hbody_ih then_body cont subr_index (by simp [countSuspendsStmt] at hbound; omega) (by rfl)
+        aesop
+
+    | IfFalse cond then_body s hcond =>
+      simp_all
+      obtain ⟨hstmt, hstate⟩ := hinitial_config
+      clear s hstate final_state
+      subst stmt
+
+      split
+      rename_i
+        result
+        head_stmt_co
+        head_subrs
+        head_subr_index
+        head_hindex
+        head_hlen
+        head_heq
+
+      simp [splitStmt] at head_heq
+      split at head_heq
+      rename_i
+        body_result
+        body_stmt_co
+        body_subrs
+        body_subr_index
+        body_hindex
+        body_hlen
+        body_heq
+
+      have head_stmt_co_is_if : head_stmt_co = StmtCo.If cond body_stmt_co := by aesop
+      subst head_stmt_co
+      apply CoroutineStep.IfFalse
+      . aesop
+
+    | LoopContinue cond body s t u hcond hbody hrest hbody_ih hrest_ih =>
+      simp at hinitial_config hbody_ih ⊢
+      obtain ⟨hstmt, hstate⟩ := hinitial_config
+      subst s
+      clear final_state
+      rename' u => final_state
+      subst stmt
+
+      split
+      rename_i
+        result
+        stmt_co
+        subrs
+        new_subr_index
+        hindex
+        hlen
+        heq
+
+      simp [splitStmt] at heq
+      split at heq
+      rename_i
+        body_result
+        body_stmt_co
+        body_subrs
+        body_subr_index
+        body_hindex
+        body_hlen
+        body_heq
+
+      have stmt_co_is_loop : stmt_co = StmtCo.Loop cond body_stmt_co := by aesop
+      subst stmt_co
+
+      apply CoroutineStep.LoopContinue _ _ _ ⟨t.trace⟩
+      . aesop
+      . have hbody_ih_app := hbody_ih body StmtCo.Skip subr_index (by simp [countSuspendsStmt] at hbound; omega) (by rfl)
+        aesop
+      . have hrest_ih_app := hrest_ih (StmtExt.Loop cond body) cont subr_index (by assumption) t (by constructor <;> rfl)
+        split at hrest_ih_app
+        rename_i heq'
+        rename StmtCo => stmt_co'
+        simp [splitStmt] at heq'
+        split at heq'
+        aesop
+    | LoopTerminate cond body s hcond =>
+      simp_all
+      obtain ⟨hstmt, hstate⟩ := hinitial_config
+      subst s
+      clear final_state
+      subst stmt
+      split
+      rename_i
+        result
+        stmt_co
+        subrs
+        new_subr_index
+        hindex
+        hlen
+        heq
+
+      simp [splitStmt] at heq
+      split at heq
+      rename_i
+        body_result
+        body_stmt_co
+        body_subrs
+        body_subr_index
+        body_hindex
+        body_hlen
+        body_heq
+
+      have stmt_co_is_loop : stmt_co = StmtCo.Loop cond body_stmt_co := by aesop
+      subst stmt_co
+      apply CoroutineStep.LoopTerminate
+      . aesop
+    | Suspend s =>
+
+      sorry
