@@ -52,6 +52,31 @@ while (cond1) {
 E;
 ```
 
+```
+entry:
+A;
+while (cond1) {
+    B;
+    frame.next_subr = 1;
+    return;
+    C;
+    D;
+}
+E;
+
+subroutine 1:
+C;
+D;
+while (cond1) {
+    B;
+    frame.next_subr = 1;
+    return;
+    C;
+    D;
+}
+E;
+```
+
 On the other hand, "condition replay" works by copying the (possibly nested) set of loops / conditionals leading up to a `suspend`, actually executing branches / loops leading up to suspend point, and using a new `SkipOnReplay` IR instruction to skip over the _first_ invocation of instructions that come prior to `suspend`. The main goal of this is to reduce code bloat that can be caused by unrolling from highly nested loops.  
 ![figure 19](fig19.png)
 
