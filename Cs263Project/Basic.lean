@@ -252,14 +252,72 @@ lemma splitStmtSimulation
   (hbound: subr_index + countSuspendsStmt stmt ≤ k)
 
   (program : @ProgramCo n k)
-  (initial_trace final_trace : List (Fin n))
-  (hrun : StraightLineStep (stmt, ⟨initial_trace⟩) ⟨final_trace⟩) :
-  have ⟨⟨result, subrs, _⟩, ⟨_, hlen⟩⟩ := splitStmt stmt cont subr_index hbound
+  (initial_state final_state : State)
+  (initial_config : (@StmtExt n × @State n))
+  (hinitial_config : initial_config.1 = stmt ∧ initial_config.2 = initial_state)
+  (hrun : StraightLineStep initial_config final_state) :
+  have ⟨⟨result, subrs, new_subr_index⟩, ⟨hindex, hlen⟩⟩ := splitStmt stmt cont subr_index hbound
 
   @CoroutineStep
-    n k
-    program
-    (result, ⟨initial_trace⟩)
-    ⟨final_trace⟩ :=
+    n k program
+    (result, ⟨initial_state.trace⟩)
+    ⟨final_state.trace⟩ :=
   by
-    sorry
+    induction hrun with
+    | ShallowInstr id state =>
+      obtain ⟨hstmt, hstate⟩ := hinitial_config
+      subst stmt
+      simp_all [splitStmt]
+
+      split
+      rename_i
+        packed_result
+        result
+        subrs
+        new_subr_index
+        hindex
+        hlen
+        heq
+
+      have result_is_shallowinstr : result = StmtCo.ShallowInstr id :=
+        by aesop
+
+      rw [result_is_shallowinstr]
+      have h := @CoroutineStep.ShallowInstr n k program id ⟨state.trace⟩
+      aesop
+
+    | Sequence A B a b c hA hB hA_ih hB_ih =>
+      obtain ⟨hstmt, hstate⟩ := hinitial_config
+      subst stmt
+
+      split
+      rename_i
+        result
+        stmt_co
+        subrs
+        subr_index
+        hindex
+        hlen
+        heq
+
+
+      -- have stmt_co_is_sequence : stmt_co = StmtCo.Sequence head_stmt_co tail_stmt_co :=
+      --   by grind
+      -- rw [stmt_co_is_sequence]
+
+      -- have tail_stmt_co_step :
+      --   @CoroutineStep n k program (tail_stmt_co, ⟨b.trace⟩) ⟨final_trace⟩ :=
+      --   by
+      --     sorry
+
+      -- have head_stmt_co_step :
+      --   @CoroutineStep n k program (head_stmt_co, ⟨initial_trace⟩) ⟨b.trace⟩ :=
+      --   by
+      --     sorry
+
+      -- apply CoroutineStep.Sequence
+      --   head_stmt_co tail_stmt_co
+      --   ⟨initial_trace⟩ ⟨b.trace⟩ ⟨final_trace⟩
+      --   head_stmt_co_step tail_stmt_co_step
+
+    | _ => sorry
