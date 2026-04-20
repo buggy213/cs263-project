@@ -9,13 +9,13 @@ variable {k : ℕ}
 
 inductive StmtExt : Type where
   | ShallowInstr (id: Fin n)
-  | Switch
-    (num_cases: ℕ)
-    (cond: List (Fin n) → Fin num_cases → Prop)
-    (cases: List (List StmtExt))
+  | Sequence (head: StmtExt) (tail: StmtExt)
+  | If
+    (cond: List (Fin n) → Prop)
+    (then_body: StmtExt)
   | Loop
     (cond: List (Fin n) → Prop)
-    (body: List StmtExt)
+    (body: StmtExt)
   | Suspend
 
 structure State where
@@ -25,80 +25,106 @@ def State.update (self: @State n) (id: Fin n) : @State n :=
   ⟨self.trace ++ [id]⟩
 
 structure ProgramExt where
-  stmts: List (@StmtExt n)
+  stmt: @StmtExt n
 
 inductive StmtCo : Type where
   | ShallowInstr (id: Fin n)
-  | Switch
-    (num_cases: ℕ)
-    (cond: List (Fin n) → Fin num_cases → Prop)
-    (cases: List (List StmtCo))
+  | Sequence (head: StmtCo) (tail: StmtCo)
+  | If
+    (cond: List (Fin n) → Prop)
+    (then_body: StmtCo)
   | Loop
     (cond: List (Fin n) → Prop)
-    (body: List StmtCo)
-  | Yield (next: Option (Fin k))
+    (body: StmtCo)
+  | Yield (next: Fin k)
+  | Skip
 
 structure StateCo where
   trace: List (Fin n)
-  next: Option (Fin k)
 
-def StateCo.update (self: @StateCo n k) (id: Fin n) : @StateCo n k :=
-  ⟨self.trace ++ [id], self.next⟩
-
-def StateCo.setNext (self: @StateCo n k) (next: Option (Fin k)) : @StateCo n k :=
-  ⟨self.trace, next⟩
+def StateCo.update (self: @StateCo n) (id: Fin n) : @StateCo n :=
+  ⟨self.trace ++ [id]⟩
 
 structure ProgramCo where
-  main: List (@StmtCo n k)
-  subroutines: List (List (@StmtCo n k))
+  main: @StmtCo n k
+  subroutines: List (@StmtCo n k)
   hsubr_count: subroutines.length = k
 
-inductive StraightLineStep : (List StmtExt × State) → (List StmtExt × State) → Prop where
-| ShallowInstr (id: Fin n) rest state :
-  StraightLineStep (StmtExt.ShallowInstr id :: rest, state) (rest, state.update id)
-| Switch num_cases cond cases i rest state (hi: cond state.trace i) (hcases: cases.length = num_cases) :
-  StraightLineStep (StmtExt.Switch num_cases cond cases :: rest, state) (cases[i.val] ++ rest, state)
-| LoopContinue cond body rest state (hcond: cond state.trace) :
-  StraightLineStep (StmtExt.Loop cond body :: rest, state) (body ++ [StmtExt.Loop cond body] ++ rest, state)
-| LoopTerminate cond body rest state (hcond: ¬cond state.trace) :
-  StraightLineStep (StmtExt.Loop cond body :: rest, state) (rest, state)
-| Suspend rest state :
-  StraightLineStep (StmtExt.Suspend :: rest, state) (rest, state)
+inductive StraightLineStep : (StmtExt × State) → State → Prop where
+| ShallowInstr (id: Fin n)
+  (s: State) :
+  StraightLineStep (StmtExt.ShallowInstr id, s) (s.update id)
+| Sequence (A B : StmtExt)
+  (a b c: State)
+  (hA : StraightLineStep (A, a) b)
+  (hB : StraightLineStep (B, b) c) :
+  StraightLineStep (StmtExt.Sequence A B, a) c
+| IfTrue (cond: List (Fin n) → Prop) (then_body: StmtExt)
+  (s t: State)
+  (hcond : cond s.trace)
+  (hbody : StraightLineStep (then_body, s) t) :
+  StraightLineStep (StmtExt.If cond then_body, s) t
+| IfFalse (cond: List (Fin n) → Prop) (then_body: StmtExt)
+  (s: State)
+  (hcond: ¬(cond s.trace)) :
+  StraightLineStep (StmtExt.If cond then_body, s) s
+| LoopContinue (cond: List (Fin n) → Prop) (body: StmtExt)
+  (s t u: State)
+  (hcond : cond s.trace)
+  (hbody : StraightLineStep (body, s) t)
+  (hrest : StraightLineStep (StmtExt.Loop cond body, t) u) :
+  StraightLineStep (StmtExt.Loop cond body, s) u
+| LoopTerminate (cond: List (Fin n) → Prop) (body: StmtExt)
+  (s: State)
+  (hcond : ¬(cond s.trace)) :
+  StraightLineStep (StmtExt.Loop cond body, s) s
+| Suspend (s: State) :
+  StraightLineStep (StmtExt.Suspend, s) s
 
-inductive CoroutineStep {program: @ProgramCo n k} : (List (@StmtCo n k) × (@StateCo n k)) → (List (@StmtCo n k) × (@StateCo n k)) → Prop where
-| ShallowInstr (id: Fin n) rest state :
-  CoroutineStep (StmtCo.ShallowInstr id :: rest, state) (rest, state.update id)
-| Switch num_cases cond cases i rest state (hi: cond state.trace i) (hcases: cases.length = num_cases) :
-  CoroutineStep (StmtCo.Switch num_cases cond cases :: rest, state) (cases[i.val] ++ rest, state)
-| LoopContinue cond body rest state (hcond: cond state.trace) :
-  CoroutineStep (StmtCo.Loop cond body :: rest, state) (body ++ [StmtCo.Loop cond body] ++ rest, state)
-| LoopTerminate cond body rest state (hcond: ¬cond state.trace) :
-  CoroutineStep (StmtCo.Loop cond body :: rest, state) (rest, state)
-| Yield (next: Option (Fin k)) rest state :
-  CoroutineStep (StmtCo.Yield next :: rest, state) ([], state.setNext next)
-| Schedule trace next :
-  CoroutineStep ([], ⟨trace, Option.some next⟩) (program.subroutines[next]'(by have len := program.hsubr_count; simp [len]), ⟨trace, .none⟩)
+inductive CoroutineStep {program: @ProgramCo n k} : ((@StmtCo n k) × (@StateCo n)) → (@StateCo n) → Prop where
+| ShallowInstr (id: Fin n)
+  (s: StateCo) :
+  CoroutineStep (StmtCo.ShallowInstr id, s) (s.update id)
+| Sequence (A B : StmtCo)
+  (a b c: StateCo)
+  (hA : @CoroutineStep program (A, a) b)
+  (hB : @CoroutineStep program (B, b) c) :
+  CoroutineStep (StmtCo.Sequence A B, a) c
+| IfTrue (cond: List (Fin n) → Prop) (then_body: StmtCo)
+  (s t: StateCo)
+  (hcond : cond s.trace)
+  (hbody : @CoroutineStep program (then_body, s) t) :
+  CoroutineStep (StmtCo.If cond then_body, s) t
+| IfFalse (cond: List (Fin n) → Prop) (then_body: StmtCo)
+  (s: StateCo)
+  (hcond: ¬(cond s.trace)) :
+  CoroutineStep (StmtCo.If cond then_body, s) s
+| LoopContinue (cond: List (Fin n) → Prop) (body: StmtCo)
+  (s t u: StateCo)
+  (hcond : cond s.trace)
+  (hbody : @CoroutineStep program (body, s) t)
+  (hrest : @CoroutineStep program (StmtCo.Loop cond body, t) u) :
+  CoroutineStep (StmtCo.Loop cond body, s) u
+| LoopTerminate (cond: List (Fin n) → Prop) (body: StmtCo)
+  (s: StateCo)
+  (hcond : ¬(cond s.trace)) :
+  CoroutineStep (StmtCo.Loop cond body, s) s
+| Yield (next: Fin k)
+  (s t: StateCo)
+  (hsubr : @CoroutineStep program (program.subroutines[next]'(by simp [program.hsubr_count]), s) t) :
+  CoroutineStep (StmtCo.Yield next, s) t
+| Skip (s: StateCo) :
+  CoroutineStep (StmtCo.Skip, s) s
 
 -- use "direct unrolling" idea as first implementation
 
-mutual
 def countSuspendsStmt : @StmtExt n → ℕ
   | .ShallowInstr _ => 0
-  | .Switch _ _ cases => countSuspendsListList cases
-  | .Loop _ body => countSuspendsList body
+  | .Sequence head tail => countSuspendsStmt head + countSuspendsStmt tail
+  | .If _ then_body => countSuspendsStmt then_body
+  | .Loop _ body => countSuspendsStmt body
   | .Suspend => 1
 
-def countSuspendsList : List (@StmtExt n) → ℕ
-  | [] => 0
-  | s :: rest => countSuspendsStmt s + countSuspendsList rest
-
-def countSuspendsListList : List (List (@StmtExt n)) → ℕ
-  | [] => 0
-  | l :: rest => countSuspendsList l + countSuspendsListList rest
-end
-
-def countSuspends (pext: @ProgramExt n) : ℕ :=
-  countSuspendsList pext.stmts
 
 /-
 the general structure of the mutually recursive `split` functions is as follows
@@ -115,94 +141,87 @@ returns:
   proof that updated subroutine index = subr_index + countSuspends of stmt/stmts
   proof that number of subroutines created = countSuspends of stmt/stmts
 -/
-mutual
-def splitStmt (stmt: @StmtExt n) (cont: List (@StmtCo n k)) (subr_index: ℕ) (hbound: subr_index + countSuspendsStmt stmt ≤ k) :
-  { result: (@StmtCo n k × List (List (@StmtCo n k)) × ℕ) // result.snd.snd = subr_index + countSuspendsStmt stmt ∧ result.snd.fst.length = countSuspendsStmt stmt } :=
+
+def splitStmt (stmt: @StmtExt n) (cont: @StmtCo n k) (subr_index: ℕ) (hbound: subr_index + countSuspendsStmt stmt ≤ k) :
+  { result: (@StmtCo n k × List (@StmtCo n k) × ℕ) // result.snd.snd = subr_index + countSuspendsStmt stmt ∧ result.snd.fst.length = countSuspendsStmt stmt } :=
   match stmt with
   | .ShallowInstr id => ⟨
     (StmtCo.ShallowInstr id, [], subr_index),
     by simp [countSuspendsStmt]
   ⟩
+  | .Sequence head tail =>
+    -- split tail first. add it to cont for head
+    let ⟨⟨tail_stmt_co, tail_subrs, tail_subr_index⟩, ⟨tail_hindex, tail_hlen⟩⟩ :=
+      splitStmt
+        tail
+        cont
+        subr_index
+        (by simp [countSuspendsStmt] at hbound; omega)
+    let ⟨⟨head_stmt_co, head_subrs, head_subr_index⟩, ⟨head_hindex, head_hlen⟩⟩ :=
+      splitStmt
+        head
+        (StmtCo.Sequence tail_stmt_co cont)
+        tail_subr_index
+        (by simp_all; rw [countSuspendsStmt] at hbound; omega)
+
+    ⟨
+      (StmtCo.Sequence head_stmt_co tail_stmt_co, head_subrs ++ tail_subrs, head_subr_index),
+      by
+        simp_all;
+        constructor;
+        . simp [countSuspendsStmt]
+          ac_rfl
+        . simp [countSuspendsStmt]
+    ⟩
+  | .If cond then_body =>
+    let ⟨⟨body_stmt_co, body_subrs, body_subr_index⟩, ⟨body_hindex, body_hlen⟩⟩ :=
+      splitStmt
+        then_body
+        cont
+        subr_index
+        (by simp [countSuspendsStmt] at hbound; assumption)
+
+    ⟨
+      (StmtCo.If cond body_stmt_co, body_subrs, body_subr_index),
+      by simp_all; simp [countSuspendsStmt]
+    ⟩
+
   | .Loop cond body =>
     -- to handle loops, we pass in an empty continuation so we can get the transformed body, then append
     -- that transformed_body + real cont onto the resulting subrs
-    let ⟨⟨transformed_body, new_subrs, new_subr_index⟩, ⟨hindex, hlen⟩⟩ :=
-      splitList body [] subr_index (by simp [countSuspendsStmt] at hbound; assumption)
-    let unrolled_subrs := List.map (fun subr ↦ subr ++ transformed_body ++ cont) new_subrs
+
+    let ⟨⟨body_stmt_co, body_subrs, body_subr_index⟩, ⟨body_hindex, body_hlen⟩⟩ :=
+      splitStmt
+        body
+        StmtCo.Skip
+        subr_index
+        (by simp [countSuspendsStmt] at hbound; assumption)
+
+    let transformed_loop := StmtCo.Loop cond body_stmt_co
+    let unrolled_subrs := List.map
+      (fun subr ↦ StmtCo.Sequence (StmtCo.Sequence subr transformed_loop) cont)
+      body_subrs
+
     ⟨
-      (StmtCo.Loop cond transformed_body, unrolled_subrs, new_subr_index),
-      by simp_all [countSuspendsStmt, unrolled_subrs]
+      (StmtCo.Loop cond body_stmt_co, unrolled_subrs, body_subr_index),
+      by
+        simp_all;
+        constructor;
+        . simp [countSuspendsStmt]
+        . simp [countSuspendsStmt, unrolled_subrs, body_hlen]
     ⟩
   | .Suspend =>
+    let next : Fin k := ⟨subr_index, by simp [countSuspendsStmt] at hbound; omega⟩
     ⟨
-      (StmtCo.Yield (.some ⟨subr_index, by simp [countSuspendsStmt] at hbound; assumption⟩), [cont], subr_index + 1),
-      by simp [countSuspendsStmt]
-    ⟩
-  | .Switch num_cases cond cases =>
-    let ⟨⟨transformed_cases, new_subrs, new_subr_index⟩, ⟨hindex, hlen⟩⟩ :=
-      splitListList cases cont subr_index (by simp [countSuspendsStmt] at hbound; assumption)
-    ⟨
-      (StmtCo.Switch num_cases cond transformed_cases, new_subrs, new_subr_index),
+      (StmtCo.Yield next, [cont], subr_index + 1),
       by simp_all [countSuspendsStmt]
     ⟩
 
-def splitList (stmts: List (@StmtExt n)) (cont: List (@StmtCo n k)) (subr_index: ℕ) (hbound: subr_index + countSuspendsList stmts ≤ k):
-  { result: (List (@StmtCo n k) × List (List (@StmtCo n k)) × ℕ) // result.snd.snd = subr_index + countSuspendsList stmts ∧ result.snd.fst.length = countSuspendsList stmts } :=
-  match stmts with
-  | [] => ⟨
-    ([], [], subr_index),
-    by simp [countSuspendsList]
-  ⟩
-  | head :: tail =>
-    let ⟨⟨transformed_stmts_tail, new_subrs_tail, new_subr_index_tail⟩, ⟨hindex_tail, hlen_tail⟩⟩ :=
-      splitList tail cont subr_index (by simp [countSuspendsList] at hbound; omega)
-    let ⟨⟨transformed_stmt, new_subrs, new_subr_index⟩, ⟨hindex_head, hlen_head⟩⟩ :=
-      splitStmt head (transformed_stmts_tail ++ cont) new_subr_index_tail (by simp_all [countSuspendsList]; omega)
-    ⟨
-      (transformed_stmt :: transformed_stmts_tail, new_subrs_tail ++ new_subrs, new_subr_index),
-      by
-        simp_all [countSuspendsList]
-        constructor
-        . ac_rfl
-        . omega
-    ⟩
-
-def splitListList (stmts: List (List (@StmtExt n))) (cont: List (@StmtCo n k)) (subr_index: ℕ) (hbound: subr_index + countSuspendsListList stmts ≤ k):
-  { result: (List (List (@StmtCo n k)) × List (List (@StmtCo n k)) × ℕ) // result.snd.snd = subr_index + countSuspendsListList stmts ∧ result.snd.fst.length = countSuspendsListList stmts } :=
-  match stmts with
-  | [] => ⟨
-    ([], [], subr_index),
-    by simp [countSuspendsListList]
-  ⟩
-  | head :: tail =>
-    let ⟨⟨transformed_stmts_tail, new_subrs_tail, new_subr_index_tail⟩, ⟨hindex_tail, hlen_tail⟩⟩ :=
-      splitListList tail cont subr_index (by simp [countSuspendsListList] at hbound; omega)
-    let ⟨⟨transformed_stmts, new_subrs, new_subr_index⟩, ⟨hindex_head, hlen_head⟩⟩ :=
-      splitList head cont new_subr_index_tail (by simp_all [countSuspendsListList]; omega)
-    ⟨
-      (transformed_stmts :: transformed_stmts_tail, new_subrs_tail ++ new_subrs, new_subr_index),
-      by
-        simp_all [countSuspendsListList]
-        constructor
-        . ac_rfl
-        . omega
-    ⟩
-
-end
-
-def split (orig: @ProgramExt n) : @ProgramCo n (countSuspends orig) :=
-  let k := countSuspends orig
+def split (orig: @ProgramExt n) : @ProgramCo n (countSuspendsStmt orig.stmt) :=
+  let k := countSuspendsStmt orig.stmt
   let ⟨⟨stmts, subrs, _⟩, ⟨_, hlen⟩⟩ :=
-    @splitList n k orig.stmts [] 0 (by simp [countSuspends, k])
+    @splitStmt n k orig.stmt StmtCo.Skip 0 (by simp [k])
   @ProgramCo.mk n k stmts (subrs) (by simp_all; rfl)
-
-abbrev StraightLineRTC := Relation.ReflTransGen (@StraightLineStep n)
-abbrev CoroutineRTC (program: @ProgramCo n k) := Relation.ReflTransGen (@CoroutineStep n k program)
-
-infixr:100 " ⇒ " => StraightLineStep
-infixr:100 " ⇒* " => StraightLineRTC
-
-#check Relation.ReflTransGen.refl
 
 -- "for all straight-line programs that halt, the final state is equal to the split program run using coroutine semantics"
 -- include initial_state to reflect to model (external) inputs to program
@@ -210,79 +229,37 @@ theorem splitPreservesSemantics :
   ∀ (program : @ProgramExt n)
     (initial_state: List (Fin n))
     (final_state: List (Fin n))
-    (hhalts: (program.stmts, ⟨initial_state⟩) ⇒* ([], ⟨final_state⟩)),
-  have split_program := (split program)
-  CoroutineRTC (split_program) (split_program.main, ⟨[], .none⟩) ([], ⟨final_state, .none⟩) := by
+    (hrun : StraightLineStep (program.stmt, ⟨initial_state⟩) ⟨final_state⟩),
+
+  have split_program := split program
+  @CoroutineStep
+    n (countSuspendsStmt program.stmt)
+    split_program
+    (split_program.main, ⟨initial_state⟩) ⟨final_state⟩ := by
 
   intro original_program final_state hhalts split_program
-
   sorry
 
 -- helper lemmas
 
-
--- if the `List (@StmtCo n k)` created by `splitList` is executed with initial state `⟨initial_trace, .none⟩`, it completely matches
--- the behavior of `List (@StmtExt n)` passed into `splitList` with initial state `⟨initial_trace, .none⟩`
+-- if the `@StmtCo n k` created by `splitStmt` is executed with initial state `⟨initial_trace⟩`, it completely matches
+-- the behavior of `@StmtExt n` passed into `splitList` with initial state `⟨initial_trace, .none⟩`
 -- if `stmts` doesn't contain any suspends, this should basically be trivial
-
-lemma splitListSimulation
-  (stmts : List (@StmtExt n))
-  (cont : List (@StmtCo n k))
-  (subr_index : ℕ)
-  (hbound : subr_index + countSuspendsList stmts ≤ k)
-  (program : @ProgramCo n k)
-  {result : List (@StmtCo n k)}
-  {coros : List (List (@StmtCo n k))}
-  {new_subr_index : ℕ}
-  (h_split : (splitList stmts cont subr_index hbound).val = (result, coros, new_subr_index))
-  (h_subrs : program.subroutines.extract subr_index (countSuspendsList stmts) = coros)
-  (initial_trace final_trace : List (Fin n))
-  (hrun : (stmts, (⟨initial_trace⟩ : @State n)) ⇒* ([], ⟨final_trace⟩)) :
-  CoroutineRTC program
-    (result ++ cont, ⟨initial_trace, .none⟩)
-    (cont, ⟨final_trace, .none⟩) :=
-  by
-    cases hrun with
-    | refl =>
-      simp [splitList] at h_split
-      simp [h_split]
-      exact Relation.ReflTransGen.refl
-    | tail previous_steps final_step =>
-      rename_i final_step_config
-      sorry
-
-
 lemma splitStmtSimulation
   (stmt: @StmtExt n)
-  (cont: List (@StmtCo n k))
+  (cont: @StmtCo n k)
   (subr_index: ℕ)
   (hbound: subr_index + countSuspendsStmt stmt ≤ k)
 
   (program : @ProgramCo n k)
-  (h_subrs : Prop /- not sure how to express this? -/)
   (initial_trace final_trace : List (Fin n))
-  (hrun : ([stmt], ⟨initial_trace⟩) ⇒* ([], ⟨final_trace⟩)) :
-  have ⟨⟨result, coros, _⟩, ⟨_, _⟩⟩ := splitStmt stmt cont subr_index hbound
-  CoroutineRTC program
-    ([result] ++ cont, ⟨initial_trace, .none⟩)
-    (cont, ⟨final_trace, .none⟩) :=
-  by
-    sorry
+  (hrun : StraightLineStep (stmt, ⟨initial_trace⟩) ⟨final_trace⟩) :
+  have ⟨⟨result, subrs, _⟩, ⟨_, hlen⟩⟩ := splitStmt stmt cont subr_index hbound
 
-lemma splitListListSimulation
-  (stmts: List (List (@StmtExt n)))
-  (cont: List (@StmtCo n k))
-  (subr_index: ℕ)
-  (hbound: subr_index + countSuspendsListList stmts ≤ k)
-
-  (program: @ProgramCo n k)
-  (h_subrs: Prop /- not sure how to express this? -/)
-  (initial_trace : List (Fin n))
-  (final_trace : List (Fin n))
-  (hruns : Prop) :
-  have ⟨⟨result, coros, _⟩, ⟨_, _⟩⟩ := splitListList stmts cont subr_index hbound
-  CoroutineRTC program
-    ([result] ++ cont, ⟨initial_trace, .none⟩)
-    (cont, ⟨final_trace, .none⟩) :=
+  @CoroutineStep
+    n k
+    program
+    (result, ⟨initial_trace⟩)
+    ⟨final_trace⟩ :=
   by
     sorry
