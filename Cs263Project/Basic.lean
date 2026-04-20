@@ -39,12 +39,6 @@ inductive StmtCo : Type where
   | Yield (next: Fin k)
   | Skip
 
-structure StateCo where
-  trace: List (Fin n)
-
-def StateCo.update (self: @StateCo n) (id: Fin n) : @StateCo n :=
-  ⟨self.trace ++ [id]⟩
-
 structure ProgramCo where
   main: @StmtCo n k
   subroutines: List (@StmtCo n k)
@@ -81,40 +75,57 @@ inductive StraightLineStep : (StmtExt × State) → State → Prop where
 | Suspend (s: State) :
   StraightLineStep (StmtExt.Suspend, s) s
 
-inductive CoroutineStep {program: @ProgramCo n k} : ((@StmtCo n k) × (@StateCo n)) → (@StateCo n) → Prop where
+inductive Outcome : Type where
+| Yielded
+| Completed
+
+inductive CoroutineStep {program: @ProgramCo n k} : ((@StmtCo n k) × (@State n)) → (@State n) → Outcome → Prop where
 | ShallowInstr (id: Fin n)
-  (s: StateCo) :
-  CoroutineStep (StmtCo.ShallowInstr id, s) (s.update id)
-| Sequence (A B : StmtCo)
-  (a b c: StateCo)
-  (hA : @CoroutineStep program (A, a) b)
-  (hB : @CoroutineStep program (B, b) c) :
-  CoroutineStep (StmtCo.Sequence A B, a) c
+  (s: State) :
+  CoroutineStep (StmtCo.ShallowInstr id, s) (s.update id) Outcome.Completed
+| SequenceNormal (A B : StmtCo)
+  (a b c: State)
+  (B_outcome: Outcome)
+  (hA : @CoroutineStep program (A, a) b Outcome.Completed)
+  (hB : @CoroutineStep program (B, b) c B_outcome) :
+  CoroutineStep (StmtCo.Sequence A B, a) c B_outcome
+| SequenceEarlyYield (A B : StmtCo)
+  (a b : State)
+  (hA : @CoroutineStep program (A, a) b Outcome.Yielded) :
+  CoroutineStep (StmtCo.Sequence A B, a) b Outcome.Yielded
 | IfTrue (cond: List (Fin n) → Prop) (then_body: StmtCo)
-  (s t: StateCo)
+  (s t: State)
   (hcond : cond s.trace)
-  (hbody : @CoroutineStep program (then_body, s) t) :
-  CoroutineStep (StmtCo.If cond then_body, s) t
+  (body_outcome: Outcome)
+  (hbody : @CoroutineStep program (then_body, s) t body_outcome) :
+  CoroutineStep (StmtCo.If cond then_body, s) t body_outcome
 | IfFalse (cond: List (Fin n) → Prop) (then_body: StmtCo)
-  (s: StateCo)
+  (s: State)
   (hcond: ¬(cond s.trace)) :
-  CoroutineStep (StmtCo.If cond then_body, s) s
-| LoopContinue (cond: List (Fin n) → Prop) (body: StmtCo)
-  (s t u: StateCo)
+  CoroutineStep (StmtCo.If cond then_body, s) s Outcome.Completed
+| LoopContinueNormal (cond: List (Fin n) → Prop) (body: StmtCo)
+  (s t u: State)
   (hcond : cond s.trace)
-  (hbody : @CoroutineStep program (body, s) t)
-  (hrest : @CoroutineStep program (StmtCo.Loop cond body, t) u) :
-  CoroutineStep (StmtCo.Loop cond body, s) u
+  (rest_outcome : Outcome)
+  (hbody : @CoroutineStep program (body, s) t Outcome.Completed)
+  (hrest : @CoroutineStep program (StmtCo.Loop cond body, t) u rest_outcome) :
+  CoroutineStep (StmtCo.Loop cond body, s) u rest_outcome
+| LoopEarlyYield (cond: List (Fin n) → Prop) (body: StmtCo)
+  (s t: State)
+  (hcond : cond s.trace)
+  (hbody: @CoroutineStep program (body, s) t Outcome.Yielded) :
+  CoroutineStep (StmtCo.Loop cond body, s) t Outcome.Yielded
 | LoopTerminate (cond: List (Fin n) → Prop) (body: StmtCo)
-  (s: StateCo)
+  (s: State)
   (hcond : ¬(cond s.trace)) :
-  CoroutineStep (StmtCo.Loop cond body, s) s
+  CoroutineStep (StmtCo.Loop cond body, s) s Outcome.Completed
 | Yield (next: Fin k)
-  (s t: StateCo)
-  (hsubr : @CoroutineStep program (program.subroutines[next]'(by simp [program.hsubr_count]), s) t) :
-  CoroutineStep (StmtCo.Yield next, s) t
-| Skip (s: StateCo) :
-  CoroutineStep (StmtCo.Skip, s) s
+  (s t: State)
+  (subr_outcome: Outcome)
+  (hsubr : @CoroutineStep program (program.subroutines[next]'(by simp [program.hsubr_count]), s) t subr_outcome) :
+  CoroutineStep (StmtCo.Yield next, s) t Outcome.Yielded
+| Skip (s: State) :
+  CoroutineStep (StmtCo.Skip, s) s Outcome.Completed
 
 -- use "direct unrolling" idea as first implementation
 
@@ -165,13 +176,14 @@ def splitStmt (stmt: @StmtExt n) (cont: @StmtCo n k) (subr_index: ℕ) (hbound: 
         (by simp_all; rw [countSuspendsStmt] at hbound; omega)
 
     ⟨
-      (StmtCo.Sequence head_stmt_co tail_stmt_co, head_subrs ++ tail_subrs, head_subr_index),
+      (StmtCo.Sequence head_stmt_co tail_stmt_co, tail_subrs ++ head_subrs, head_subr_index),
       by
-        simp_all;
-        constructor;
+        simp_all
+        constructor
         . simp [countSuspendsStmt]
           ac_rfl
         . simp [countSuspendsStmt]
+          ac_rfl
     ⟩
   | .If cond then_body =>
     let ⟨⟨body_stmt_co, body_subrs, body_subr_index⟩, ⟨body_hindex, body_hlen⟩⟩ :=
@@ -187,28 +199,25 @@ def splitStmt (stmt: @StmtExt n) (cont: @StmtCo n k) (subr_index: ℕ) (hbound: 
     ⟩
 
   | .Loop cond body =>
-    -- to handle loops, we pass in an empty continuation so we can get the transformed body, then append
-    -- that transformed_body + real cont onto the resulting subrs
-
+    -- two-call technique: first call with Skip gives the (continuation-independent)
+    -- transformed body statement we need to build transformed_loop; second call with
+    -- the real continuation yields the correct subroutine bodies.
+    let body_fake :=
+      splitStmt body StmtCo.Skip subr_index
+        (by simp [countSuspendsStmt] at hbound; assumption)
+    let body_stmt_co := body_fake.val.1
+    let transformed_loop : @StmtCo n k := StmtCo.Loop cond body_stmt_co
+    let correct_cont : @StmtCo n k := StmtCo.Sequence transformed_loop cont
     let ⟨⟨body_stmt_co, body_subrs, body_subr_index⟩, ⟨body_hindex, body_hlen⟩⟩ :=
-      splitStmt
-        body
-        StmtCo.Skip
-        subr_index
+      splitStmt body correct_cont subr_index
         (by simp [countSuspendsStmt] at hbound; assumption)
 
-    let transformed_loop := StmtCo.Loop cond body_stmt_co
-    let unrolled_subrs := List.map
-      (fun subr ↦ StmtCo.Sequence (StmtCo.Sequence subr transformed_loop) cont)
-      body_subrs
-
     ⟨
-      (StmtCo.Loop cond body_stmt_co, unrolled_subrs, body_subr_index),
+      (StmtCo.Loop cond body_stmt_co, body_subrs, body_subr_index),
       by
-        simp_all;
-        constructor;
-        . simp [countSuspendsStmt]
-        . simp [countSuspendsStmt, unrolled_subrs, body_hlen]
+        refine ⟨?_, ?_⟩
+        · simp [countSuspendsStmt]; exact body_hindex
+        · simp [countSuspendsStmt]; exact body_hlen
     ⟩
   | .Suspend =>
     let next : Fin k := ⟨subr_index, by simp [countSuspendsStmt] at hbound; omega⟩
@@ -223,8 +232,130 @@ def split (orig: @ProgramExt n) : @ProgramCo n (countSuspendsStmt orig.stmt) :=
     @splitStmt n k orig.stmt StmtCo.Skip 0 (by simp [k])
   @ProgramCo.mk n k stmts (subrs) (by simp_all; rfl)
 
+
+-- ==========================================================================
+-- helper lemmas
+-- ==========================================================================
+
+-- semantic associativity of Sequence (right-rotation)
+lemma coroutineSeqAssocLR {program : @ProgramCo n k}
+    {A B C : @StmtCo n k} {s u : @State n} {out : Outcome}
+    (h : @CoroutineStep n k program (StmtCo.Sequence A (StmtCo.Sequence B C), s) u out) :
+    @CoroutineStep n k program (StmtCo.Sequence (StmtCo.Sequence A B) C, s) u out := by
+  cases h with
+  | SequenceNormal _ _ _ b _ _ hA hBC =>
+    cases hBC with
+    | SequenceNormal _ _ _ b' _ _ hB hC =>
+      exact CoroutineStep.SequenceNormal _ _ _ b' _ _
+        (CoroutineStep.SequenceNormal _ _ _ b _ _ hA hB) hC
+    | SequenceEarlyYield _ _ _ _ hB =>
+      exact CoroutineStep.SequenceEarlyYield _ _ _ _
+        (CoroutineStep.SequenceNormal _ _ _ b _ _ hA hB)
+  | SequenceEarlyYield _ _ _ _ hA =>
+    exact CoroutineStep.SequenceEarlyYield _ _ _ _
+      (CoroutineStep.SequenceEarlyYield _ _ _ _ hA)
+
+-- semantic associativity of Sequence (left-rotation)
+lemma coroutineSeqAssocRL {program : @ProgramCo n k}
+    {A B C : @StmtCo n k} {s u : @State n} {out : Outcome}
+    (h : @CoroutineStep n k program (StmtCo.Sequence (StmtCo.Sequence A B) C, s) u out) :
+    @CoroutineStep n k program (StmtCo.Sequence A (StmtCo.Sequence B C), s) u out := by
+  cases h with
+  | SequenceNormal _ _ _ _ _ _ hAB hC =>
+    cases hAB with
+    | SequenceNormal _ _ _ a _ _ hA hB =>
+      exact CoroutineStep.SequenceNormal _ _ _ a _ _ hA
+        (CoroutineStep.SequenceNormal _ _ _ _ _ _ hB hC)
+  | SequenceEarlyYield _ _ _ _ hAB =>
+    cases hAB with
+    | SequenceNormal _ _ _ a _ _ hA hB =>
+      exact CoroutineStep.SequenceNormal _ _ _ a _ _ hA
+        (CoroutineStep.SequenceEarlyYield _ _ _ _ hB)
+    | SequenceEarlyYield _ _ _ _ hA =>
+      exact CoroutineStep.SequenceEarlyYield _ _ _ _ hA
+
+-- Skip can only step from a state to itself with outcome Completed
+lemma skipCoroutineStep {program : @ProgramCo n k} {s u : @State n} {out : Outcome}
+    (h : @CoroutineStep n k program (StmtCo.Skip, s) u out) :
+    u = s ∧ out = Outcome.Completed := by
+  cases h; exact ⟨rfl, rfl⟩
+
+-- continuation-independence: the stmt_co produced by splitStmt does not depend on cont,
+-- only on the stmt and the starting subroutine index.
+lemma splitStmt_result_cont_indep (stmt : @StmtExt n) :
+    ∀ (cont1 cont2 : @StmtCo n k) (idx : ℕ)
+      (hb1 : idx + countSuspendsStmt stmt ≤ k)
+      (hb2 : idx + countSuspendsStmt stmt ≤ k),
+      (splitStmt stmt cont1 idx hb1).val.1 = (splitStmt stmt cont2 idx hb2).val.1 := by
+  induction stmt with
+  | ShallowInstr id =>
+    intros; rfl
+  | Sequence head tail ih_head ih_tail =>
+    intro cont1 cont2 idx hb1 hb2
+    -- all the sub-calls have the same indices (by property) and continuation-free stmt_cos
+    sorry
+  | If cond body ih =>
+    intro cont1 cont2 idx hb1 hb2
+    sorry
+  | Loop cond body _ih =>
+    intros; sorry
+  | Suspend =>
+    intros; rfl
+
+-- ==========================================================================
+-- Main simulation lemma: running (split_result; cont) under coroutine semantics
+-- reaches the same end state as cont does from the straight-line final state.
+-- ==========================================================================
+
+lemma splitStmtSimulation
+    (program : @ProgramCo n k)
+    (stmt : @StmtExt n)
+    (cont : @StmtCo n k)
+    (subr_index : ℕ)
+    (hbound : subr_index + countSuspendsStmt stmt ≤ k)
+
+    (s t u : State)
+    (cfg : @StmtExt n × State)
+    (hcfg : cfg = (stmt, s))
+    (hrun : StraightLineStep cfg t)
+
+    (stmt_co : @StmtCo n k)
+    (subrs : List (@StmtCo n k))
+    (new_subr_index : ℕ)
+    (hindex : new_subr_index = subr_index + countSuspendsStmt stmt)
+    (hlen : subrs.length = countSuspendsStmt stmt)
+    (hsplit : splitStmt stmt cont subr_index hbound = ⟨(stmt_co, subrs, new_subr_index), ⟨hindex, hlen⟩⟩)
+
+    (hwell_formed : ∀ i (hi : i < subrs.length),
+      program.subroutines[subr_index + i]'(by rw [program.hsubr_count]; rw [hlen] at hi; omega) = subrs[i])
+
+    (cont_outcome : Outcome)
+    (hcont : @CoroutineStep n k program (cont, t) u cont_outcome) :
+    ∃ outcome, @CoroutineStep n k program
+      (StmtCo.Sequence stmt_co cont, s)
+      u outcome := by
+  induction hrun with
+  | ShallowInstr id st =>
+    sorry
+  | Sequence A B a b c hA hB hA_ih hB_ih =>
+    sorry
+  | IfTrue cond body s' t' hcond hbody hbody_ih =>
+    sorry
+  | IfFalse cond body s' hcond =>
+    sorry
+  | LoopContinue cond body s' t' u' hcond hbody hrest hbody_ih hrest_ih =>
+    sorry
+  | LoopTerminate cond body s' hcond =>
+    sorry
+  | Suspend st =>
+    sorry
+
+
+-- ==========================================================================
+-- Top-level theorem: split preserves big-step semantics.
+-- ==========================================================================
+
 -- "for all straight-line programs that halt, the final state is equal to the split program run using coroutine semantics"
--- include initial_state to reflect to model (external) inputs to program
 theorem splitPreservesSemantics :
   ∀ (program : @ProgramExt n)
     (initial_state: List (Fin n))
@@ -232,271 +363,12 @@ theorem splitPreservesSemantics :
     (hrun : StraightLineStep (program.stmt, ⟨initial_state⟩) ⟨final_state⟩),
 
   have split_program := split program
+
+  ∃outcome,
   @CoroutineStep
     n (countSuspendsStmt program.stmt)
     split_program
-    (split_program.main, ⟨initial_state⟩) ⟨final_state⟩ := by
-
-  intro original_program final_state hhalts split_program
+    (split_program.main, ⟨initial_state⟩) ⟨final_state⟩
+    outcome := by
+  intro orig init_trace final_trace hrun
   sorry
-
--- helper lemmas
-
--- if the `@StmtCo n k` created by `splitStmt` is executed with initial state `⟨initial_trace⟩`, it completely matches
--- the behavior of `@StmtExt n` passed into `splitList` with initial state `⟨initial_trace, .none⟩`
--- if `stmts` doesn't contain any suspends, this should basically be trivial
-lemma splitStmtSimulation
-  (stmt: @StmtExt n)
-  (cont: @StmtCo n k)
-  (subr_index: ℕ)
-  (hbound: subr_index + countSuspendsStmt stmt ≤ k)
-
-  (program : @ProgramCo n k)
-  (initial_state final_state : State)
-  (initial_config : (@StmtExt n × @State n))
-  (hinitial_config : initial_config.1 = stmt ∧ initial_config.2 = initial_state)
-  (hrun : StraightLineStep initial_config final_state) :
-  have ⟨⟨result, subrs, new_subr_index⟩, ⟨hindex, hlen⟩⟩ := splitStmt stmt cont subr_index hbound
-
-  @CoroutineStep
-    n k program
-    (result, ⟨initial_state.trace⟩)
-    ⟨final_state.trace⟩ :=
-  by
-    induction hrun generalizing stmt initial_state cont subr_index with
-    | ShallowInstr id state =>
-      obtain ⟨hstmt, hstate⟩ := hinitial_config
-      subst stmt
-      simp_all [splitStmt]
-
-      split
-      rename_i
-        packed_result
-        result
-        subrs
-        new_subr_index
-        hindex
-        hlen
-        heq
-
-      have result_is_shallowinstr : result = StmtCo.ShallowInstr id :=
-        by aesop
-
-      rw [result_is_shallowinstr]
-      have h := @CoroutineStep.ShallowInstr n k program id ⟨state.trace⟩
-      aesop
-
-    | Sequence A B a b c hA hB hA_ih hB_ih =>
-      obtain ⟨hstmt, hstate⟩ := hinitial_config
-      subst stmt
-
-      split
-      rename_i
-        result
-        stmt_co
-        subrs
-        new_subr_index
-        hindex
-        hlen
-        heq
-
-      simp [splitStmt] at heq
-
-      split at heq
-      rename_i
-        tail_result
-        tail_stmt_co
-        tail_subrs
-        tail_subr_index
-        tail_hindex
-        tail_hlen
-        tail_heq
-
-      split at heq
-      rename_i
-        head_result
-        head_stmt_co
-        head_subrs
-        head_subr_index
-        head_hindex
-        head_hlen
-        head_heq
-
-      simp_all
-
-      have stmt_co_is_sequence : stmt_co = StmtCo.Sequence head_stmt_co tail_stmt_co :=
-        by grind
-      rw [stmt_co_is_sequence]
-
-      have hB_app := hB_ih B cont subr_index (by simp [countSuspendsStmt] at hbound; omega) (by rfl)
-      split at hB_app
-      rename_i hB_heq
-      rename StmtCo => hB_stmt_co
-      have hB_stmt_co_is_tail_stmt_co : hB_stmt_co = tail_stmt_co := by aesop
-
-      have tail_stmt_co_step :
-        @CoroutineStep n k program (tail_stmt_co, ⟨b.trace⟩) ⟨c.trace⟩ :=
-        by aesop
-
-      have hA_app := hA_ih A (StmtCo.Sequence tail_stmt_co cont) tail_subr_index (by simp [countSuspendsStmt] at hbound; simp at tail_hindex; omega) (by rfl)
-      split at hA_app
-      rename_i hA_heq
-      rename StmtCo => hA_stmt_co
-      have hA_stmt_co_is_head_stmt_co : hA_stmt_co = head_stmt_co := by aesop
-
-
-      have head_stmt_co_step :
-        @CoroutineStep n k program (head_stmt_co, ⟨initial_state.trace⟩) ⟨b.trace⟩ :=
-        by aesop
-
-      apply CoroutineStep.Sequence
-        head_stmt_co tail_stmt_co
-        ⟨initial_state.trace⟩ ⟨b.trace⟩ ⟨c.trace⟩
-        head_stmt_co_step tail_stmt_co_step
-
-    | IfTrue cond then_body s t hcond hbody hbody_ih =>
-      simp_all
-      obtain ⟨hstmt, hstate⟩ := hinitial_config
-      clear s hstate final_state
-      rename' t => final_state
-      subst stmt
-
-      split
-      rename_i
-        result
-        head_stmt_co
-        head_subrs
-        head_subr_index
-        head_hindex
-        head_hlen
-        head_heq
-
-      simp at head_hlen head_hindex
-      simp [splitStmt] at head_heq
-      split at head_heq
-      rename_i
-        tail_result
-        tail_stmt_co
-        tail_subrs
-        tail_subr_index
-        tail_hindex
-        tail_hlen
-        tail_heq
-
-      have head_stmt_co_is_if : head_stmt_co = StmtCo.If cond tail_stmt_co := by aesop
-      subst head_stmt_co
-
-      apply CoroutineStep.IfTrue
-      . aesop
-      . have hbody_ih_app := hbody_ih then_body cont subr_index (by simp [countSuspendsStmt] at hbound; omega) (by rfl)
-        aesop
-
-    | IfFalse cond then_body s hcond =>
-      simp_all
-      obtain ⟨hstmt, hstate⟩ := hinitial_config
-      clear s hstate final_state
-      subst stmt
-
-      split
-      rename_i
-        result
-        head_stmt_co
-        head_subrs
-        head_subr_index
-        head_hindex
-        head_hlen
-        head_heq
-
-      simp [splitStmt] at head_heq
-      split at head_heq
-      rename_i
-        body_result
-        body_stmt_co
-        body_subrs
-        body_subr_index
-        body_hindex
-        body_hlen
-        body_heq
-
-      have head_stmt_co_is_if : head_stmt_co = StmtCo.If cond body_stmt_co := by aesop
-      subst head_stmt_co
-      apply CoroutineStep.IfFalse
-      . aesop
-
-    | LoopContinue cond body s t u hcond hbody hrest hbody_ih hrest_ih =>
-      simp at hinitial_config hbody_ih ⊢
-      obtain ⟨hstmt, hstate⟩ := hinitial_config
-      subst s
-      clear final_state
-      rename' u => final_state
-      subst stmt
-
-      split
-      rename_i
-        result
-        stmt_co
-        subrs
-        new_subr_index
-        hindex
-        hlen
-        heq
-
-      simp [splitStmt] at heq
-      split at heq
-      rename_i
-        body_result
-        body_stmt_co
-        body_subrs
-        body_subr_index
-        body_hindex
-        body_hlen
-        body_heq
-
-      have stmt_co_is_loop : stmt_co = StmtCo.Loop cond body_stmt_co := by aesop
-      subst stmt_co
-
-      apply CoroutineStep.LoopContinue _ _ _ ⟨t.trace⟩
-      . aesop
-      . have hbody_ih_app := hbody_ih body StmtCo.Skip subr_index (by simp [countSuspendsStmt] at hbound; omega) (by rfl)
-        aesop
-      . have hrest_ih_app := hrest_ih (StmtExt.Loop cond body) cont subr_index (by assumption) t (by constructor <;> rfl)
-        split at hrest_ih_app
-        rename_i heq'
-        rename StmtCo => stmt_co'
-        simp [splitStmt] at heq'
-        split at heq'
-        aesop
-    | LoopTerminate cond body s hcond =>
-      simp_all
-      obtain ⟨hstmt, hstate⟩ := hinitial_config
-      subst s
-      clear final_state
-      subst stmt
-      split
-      rename_i
-        result
-        stmt_co
-        subrs
-        new_subr_index
-        hindex
-        hlen
-        heq
-
-      simp [splitStmt] at heq
-      split at heq
-      rename_i
-        body_result
-        body_stmt_co
-        body_subrs
-        body_subr_index
-        body_hindex
-        body_hlen
-        body_heq
-
-      have stmt_co_is_loop : stmt_co = StmtCo.Loop cond body_stmt_co := by aesop
-      subst stmt_co
-      apply CoroutineStep.LoopTerminate
-      . aesop
-    | Suspend s =>
-
-      sorry
