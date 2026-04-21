@@ -325,6 +325,44 @@ def test_0_split : @ProgramCo 5 1 := split ⟨test_0⟩
 end tests
 
 -- ==========================================================================
+-- Helper lemma: the transformed statement produced by `splitStmt` does not
+-- depend on the continuation `cont`. This is needed because `splitStmt`'s
+-- `Loop` case calls `splitStmt body ...` twice (once with `Skip` to form the
+-- self-referential cont, once with the real cont to populate subroutines),
+-- and the `let`-shadowing makes the two transformed bodies definitionally
+-- distinct even though they are propositionally equal.
+-- ==========================================================================
+
+lemma splitStmt_stmt_cont_invariant
+    (stmt : @StmtExt n)
+    (cont₁ cont₂ : @StmtCo n k)
+    (subr_index : ℕ)
+    (hindex : subr_index + countSuspendsStmt stmt ≤ k) :
+    (splitStmt stmt cont₁ subr_index hindex).val.1 =
+      (splitStmt stmt cont₂ subr_index hindex).val.1 := by
+
+  induction stmt generalizing cont₁ cont₂ subr_index with
+  | ShallowInstr id => rfl
+  | Suspend => rfl
+  | If cond body ih =>
+    simp [splitStmt]
+    split
+    split
+    grind
+  | Loop cond body ih =>
+    simp [splitStmt]
+    split
+    split
+    grind
+  | Sequence head tail ih_head ih_tail =>
+    simp [splitStmt]
+    split
+    split
+    split
+    split
+    grind
+
+-- ==========================================================================
 -- Main simulation lemma: running (split_result; cont) under coroutine semantics
 -- reaches the same end state as cont does from the straight-line final state.
 -- ==========================================================================
@@ -612,30 +650,92 @@ lemma splitStmtSimulation
     rename_i body_result body_stmt_co body_subrs body_subr_index body_hindex body_hlen body_heq
     clear body_result
 
-    have itwantsthis : @CoroutineStep n k program ((StmtCo.Sequence (StmtCo.Loop cond (splitStmt body StmtCo.Skip subr_index hbound).val.1) cont), t') u cont_outcome := by sorry
-    have hbody_ih_app := hbody_ih
-      body
-      (StmtCo.Sequence (StmtCo.Loop cond (splitStmt body StmtCo.Skip subr_index hbound).val.1) cont)
-      subr_index
-      (by simp [countSuspendsStmt] at hbound; omega)
-      s (by rfl)
-      body_stmt_co body_subrs body_subr_index
-      body_hindex body_hlen body_heq
-      (by
-        have body_subrs_is_subrs : body_subrs = subrs := by
-          subst hindex
-          simp_all only [Prod.mk.injEq, and_imp, forall_apply_eq_imp_iff, Subtype.mk.injEq]
-        subst body_subrs
-        exact hwell_formed)
-      cont_outcome itwantsthis
-    clear hbody_ih
-
     have stmt_co_is_loop : stmt_co = StmtCo.Loop cond body_stmt_co := by
       subst hindex
       simp_all only [Prod.mk.injEq, Subtype.mk.injEq]
     subst stmt_co
+    have subrs_is_body_subrs : subrs = body_subrs := by
+      subst hindex
+      simp_all only [Prod.mk.injEq, and_imp, forall_apply_eq_imp_iff, Subtype.mk.injEq, true_and]
+    subst subrs
 
-    sorry
+    have body_invariance :
+      (splitStmt body StmtCo.Skip subr_index
+        (by simp [countSuspendsStmt] at hbound; assumption)).val.1
+        = body_stmt_co := by
+      have split_invariance := splitStmt_stmt_cont_invariant
+        body
+        StmtCo.Skip
+        (StmtCo.Sequence (StmtCo.Loop cond (splitStmt body StmtCo.Skip subr_index hbound).val.1) cont)
+        subr_index
+        hbound
+      rw [split_invariance]
+      grind
+
+
+    obtain ⟨rest_outcome, hrest_co⟩ := hrest_ih_app
+    -- rest either goes from t' → u' (if rest completed) or t' → u (if rest yielded)
+    rcases hrest_co with ⟨rfl, hrest_completed⟩ | ⟨rfl, hrest_yielded⟩
+    . -- body was split (2nd time) using (Loop (...); cont) as continuation
+      -- so we pass that into hbody_ih
+      -- to make use of inductive hypothesis, we need to prove that (Loop (...); cont) takes t' → u
+      have hrest_completed_then_cont :
+        @CoroutineStep
+          n k program
+          (StmtCo.Sequence (StmtCo.Loop cond (splitStmt body StmtCo.Skip subr_index hbound).val.1) cont, t') u cont_outcome := by
+           rw [body_invariance]
+           exact CoroutineStep.SequenceNormal
+            _ cont t' u' u
+            cont_outcome hrest_completed hcont
+
+      have hbody_ih_app := hbody_ih
+        body
+        (StmtCo.Sequence (StmtCo.Loop cond (splitStmt body StmtCo.Skip subr_index hbound).val.1) cont)
+        subr_index
+        (by simp [countSuspendsStmt] at hbound; omega)
+        s (by rfl)
+        body_stmt_co body_subrs body_subr_index
+        body_hindex body_hlen body_heq
+        hwell_formed
+        cont_outcome hrest_completed_then_cont
+      clear hbody_ih
+
+      obtain ⟨body_outcome, hbody_co⟩ := hbody_ih_app
+      rcases hbody_co with ⟨rfl, hbody_completed⟩ | ⟨rfl, hbody_yielded⟩
+      . refine ⟨Outcome.Completed, Or.inl ⟨rfl, ?_⟩⟩
+        exact CoroutineStep.LoopContinueNormal
+          cond body_stmt_co s t' u'
+          hcond Outcome.Completed hbody_completed hrest_completed
+      . refine ⟨Outcome.Yielded, Or.inr ⟨rfl, ?_⟩⟩
+        exact CoroutineStep.LoopEarlyYield cond body_stmt_co s u hcond hbody_yielded
+    . have itwantsthis :
+        @CoroutineStep
+          n k program
+          (StmtCo.Sequence (StmtCo.Loop cond (splitStmt body StmtCo.Skip subr_index hbound).val.1) cont, t') u Outcome.Yielded := by
+          rw [body_invariance]; clear body_invariance
+          exact CoroutineStep.SequenceEarlyYield _ cont t' u hrest_yielded
+
+      -- Apply hbody_ih with cont_outcome = Yielded (NOT the outer cont_outcome).
+      have hbody_ih_app := hbody_ih body _
+        subr_index (by simp [countSuspendsStmt] at hbound; omega)
+        s (by rfl)
+        body_stmt_co body_subrs body_subr_index
+        body_hindex body_hlen body_heq
+        hwell_formed
+        Outcome.Yielded itwantsthis
+      clear hbody_ih
+
+      obtain ⟨body_outcome, hbody_co⟩ := hbody_ih_app
+      rcases hbody_co with ⟨rfl, hbody_completed⟩ | ⟨rfl, hbody_yielded⟩
+      . -- body completed at t', rest yielded at u: LoopContinueNormal w/ Yielded.
+        refine ⟨Outcome.Yielded, Or.inr ⟨rfl, ?_⟩⟩
+        exact CoroutineStep.LoopContinueNormal
+          cond body_stmt_co s t' u
+          hcond Outcome.Yielded
+          hbody_completed hrest_yielded
+
+      . refine ⟨Outcome.Yielded, Or.inr ⟨rfl, ?_⟩⟩
+        exact CoroutineStep.LoopEarlyYield cond body_stmt_co s u hcond hbody_yielded
 
   | LoopTerminate cond body s' hcond =>
     refine ⟨Outcome.Completed, ?_⟩
@@ -683,19 +783,43 @@ lemma splitStmtSimulation
 -- ==========================================================================
 
 -- "for all straight-line programs that halt, the final state is equal to the split program run using coroutine semantics"
-theorem splitPreservesSemantics :
-  ∀ (program : @ProgramExt n)
-    (initial_state: List (Fin n))
-    (final_state: List (Fin n))
-    (hrun : StraightLineStep (program.stmt, ⟨initial_state⟩) ⟨final_state⟩),
-
-  have split_program := split program
-
+theorem splitPreservesSemantics
+  (program : @ProgramExt n)
+  (initial_state: List (Fin n))
+  (final_state: List (Fin n))
+  (hrun : StraightLineStep (program.stmt, ⟨initial_state⟩) ⟨final_state⟩)
+  (split_program : @ProgramCo n (countSuspendsStmt program.stmt))
+  (hsplit_program : split_program = split program):
   ∃outcome,
   @CoroutineStep
     n (countSuspendsStmt program.stmt)
     split_program
     (split_program.main, ⟨initial_state⟩) ⟨final_state⟩
     outcome := by
-  intro orig init_trace final_trace hrun
-  sorry
+  have splitStmtSimulation_app := splitStmtSimulation
+    split_program
+    program.stmt
+    StmtCo.Skip
+    0
+    (by omega)
+    ⟨initial_state⟩
+    ⟨final_state⟩
+    ⟨final_state⟩
+    (program.stmt, ⟨initial_state⟩)
+    (by rfl)
+    hrun
+    split_program.main
+    split_program.subroutines
+    (countSuspendsStmt program.stmt)
+    (by simp)
+    split_program.hsubr_count
+    (by
+      rw [split] at hsplit_program
+      split at hsplit_program
+      rename_i hindex hlen heq
+      simp at hindex
+      simp [heq, hsplit_program, hindex])
+    (by intros; simp)
+    Outcome.Completed
+    (by apply CoroutineStep.Skip)
+  grind
