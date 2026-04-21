@@ -445,13 +445,17 @@ lemma splitStmtSimulation
       simp_all only [Prod.mk.injEq, and_imp, forall_apply_eq_imp_iff, Subtype.mk.injEq]
     subst subrs
 
-    -- apply hB's inductive hypothesis first
+    -- apply hB's inductive hypothesis first, to get that (B, b) coroutine-steps to c and didn't yield
+    -- or coroutine-steps to u by yielding
     have hB_app := hB_ih
       B cont subr_index
       (by simp [countSuspendsStmt] at hbound; omega)
       b (by rfl)
       B_stmt_co B_subrs B_subr_index B_hindex B_hlen B_heq
       (by
+        -- well-formedness proof: comes from well-formedness from outer scope
+        -- and knowledge that it's just picking out of the first part of subrs due to the
+        -- way splitStmt is implemented
         intro i hi
         have hidx : i < (B_subrs ++ A_subrs).length := by
           simp [List.length_append]
@@ -474,7 +478,8 @@ lemma splitStmtSimulation
       have hB_cont : @CoroutineStep n k program (StmtCo.Sequence B_stmt_co cont, b) u Outcome.Yielded := by
         apply CoroutineStep.SequenceEarlyYield B_stmt_co cont b u hB_co
 
-      -- then, apply hA's inductive hypothesis
+      -- then, apply hA's inductive hypothesis, to get that (A, s) coroutine-steps to b and didn't yield
+      -- or coroutine-steps to u by yielding
       simp at A_hindex B_hindex B_hlen
       simp [countSuspendsStmt] at hbound hindex
       have hA_app := hA_ih
