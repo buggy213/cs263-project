@@ -338,8 +338,7 @@ lemma splitStmt_stmt_cont_invariant
     (cont₁ cont₂ : @StmtCo n k)
     (subr_index : ℕ)
     (hindex : subr_index + countSuspendsStmt stmt ≤ k) :
-    (splitStmt stmt cont₁ subr_index hindex).val.1 =
-      (splitStmt stmt cont₂ subr_index hindex).val.1 := by
+    (splitStmt stmt cont₁ subr_index hindex).val.1 = (splitStmt stmt cont₂ subr_index hindex).val.1 := by
 
   induction stmt generalizing cont₁ cont₂ subr_index with
   | ShallowInstr id => rfl
@@ -362,11 +361,19 @@ lemma splitStmt_stmt_cont_invariant
     split
     grind
 
--- ==========================================================================
--- Main simulation lemma: running (split_result; cont) under coroutine semantics
--- reaches the same end state as cont does from the straight-line final state.
--- ==========================================================================
-
+-- main simulation lemma
+-- assuming (stmt, s) straight-line-steps to t
+-- then letting stmt_co be the output of splitStmt
+-- (and a "well-formedness" hypothesis to constrain program to match the subroutines splitStmt created)
+-- (as well as "hcont", which says that the continuation passed into splitStmt satisfies (cont, t) coroutine-steps to u)
+-- either one of two cases
+-- 1. the big-step of stmt didn't contain a suspend
+--    in this case, we have that (stmt_co, s) coroutine-steps to t
+-- 2. the big-step of stmt did contain a suspend
+--    in this case, we have that (stmt_co, s) coroutine-steps to u, because
+--    the yield that the suspend turned into "extends" the coroutine-step into a different subroutine,
+--    which includes both the part of the straight-line-step following the suspend which ends up at t,
+--    and the continuation which goes from t to u.
 lemma splitStmtSimulation
     (program : @ProgramCo n k)
     (stmt : @StmtExt n)
@@ -396,6 +403,9 @@ lemma splitStmtSimulation
     (outcome = Outcome.Yielded ∧ @CoroutineStep n k program (stmt_co, s) u outcome) := by
   induction hrun generalizing stmt cont subrs subr_index new_subr_index stmt_co s hwell_formed cont_outcome with
   | ShallowInstr id state =>
+    -- this case is straightforward, ShallowInstr cannot contain a Suspend, so it's always in case 1
+    -- and the semantics for ShallowInstr after splitting is totally equivalent;
+    -- just need to compute through splitStmt to get that stmt_co is `StmtCo.ShallowInstr id`
     refine ⟨Outcome.Completed, ?_⟩
     simp
     have hstmt : stmt = StmtExt.ShallowInstr id := by
@@ -409,6 +419,8 @@ lemma splitStmtSimulation
     subst stmt_co
     apply CoroutineStep.ShallowInstr id s
   | Sequence A B a b c hA hB hA_ih hB_ih =>
+    -- prologue here simplifies the context a bit to undo the generalization required for `induction`
+    -- and remove redundant variables
     have hstmt : stmt = A; B := by
       subst hindex
       simp_all only [Prod.mk.injEq, and_imp, forall_apply_eq_imp_iff]
@@ -419,6 +431,8 @@ lemma splitStmtSimulation
     subst stmt
     clear hcfg
 
+    -- compute through two recursive calls to splitStmt in the `Sequence` case for splitStmt
+    -- give the results names (`heq` hypothesis links these names to splitStmt applied to arguments)
     rw [splitStmt] at hsplit
     split at hsplit
     rename_i B_result B_stmt_co B_subrs B_subr_index B_hindex B_hlen B_heq
@@ -454,10 +468,9 @@ lemma splitStmtSimulation
 
     obtain ⟨B_outcome, hB_co⟩ := hB_app
 
-    -- this is true, because if B_outcome is Yielded, then the continuation is "skipped"
-    -- if it's completed, then this is given directly from hB_ih
     cases B_outcome
     . simp at hB_co
+      -- this is true, because if B_outcome is Yielded, then the continuation is "skipped"
       have hB_cont : @CoroutineStep n k program (StmtCo.Sequence B_stmt_co cont, b) u Outcome.Yielded := by
         apply CoroutineStep.SequenceEarlyYield B_stmt_co cont b u hB_co
 
@@ -507,9 +520,9 @@ lemma splitStmtSimulation
         apply CoroutineStep.SequenceNormal A_stmt_co B_stmt_co s b u Outcome.Yielded hA_co hB_co
 
     . simp at hB_co
+      -- otherwise, outcome for (B; cont) depends on outcome of cont
       have hB_cont : @CoroutineStep n k program (StmtCo.Sequence B_stmt_co cont, b) u cont_outcome := by
         apply CoroutineStep.SequenceNormal B_stmt_co cont b c u cont_outcome hB_co hcont
-
 
       -- then, apply hA's inductive hypothesis
       simp at A_hindex B_hindex B_hlen
