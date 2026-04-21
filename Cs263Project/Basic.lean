@@ -487,58 +487,159 @@ lemma splitStmtSimulation
 
     -- this is true, because if B_outcome is Yielded, then the continuation is "skipped"
     -- if it's completed, then this is given directly from hB_ih
-    let B_then_cont_outcome : Outcome :=
-      match B_outcome, cont_outcome with
-      | .Yielded, _ => .Yielded
-      | .Completed, cont_outcome => cont_outcome
-    have hB_cont : @CoroutineStep n k program (StmtCo.Sequence B_stmt_co cont, b) u B_then_cont_outcome := by
-      cases B_outcome
-      . simp at hB_co
+    cases B_outcome
+    . simp at hB_co
+      have hB_cont : @CoroutineStep n k program (StmtCo.Sequence B_stmt_co cont, b) u Outcome.Yielded := by
         apply CoroutineStep.SequenceEarlyYield B_stmt_co cont b u hB_co
-      . simp at hB_co
+
+      -- then, apply hA's inductive hypothesis
+      simp at A_hindex B_hindex B_hlen
+      simp [countSuspendsStmt] at hbound hindex
+      have hA_app := hA_ih
+        A (StmtCo.Sequence B_stmt_co cont) B_subr_index
+        (by
+          rw [B_hindex]
+          omega)
+        s (by rfl)
+        A_stmt_co A_subrs A_subr_index A_hindex A_hlen A_heq
+        (by
+          intro i hi
+          subst B_subr_index
+          have hidx : B_subrs.length + i < (B_subrs ++ A_subrs).length := by
+            simp [List.length_append]
+            omega
+          have hwell_formed_app := hwell_formed
+            (B_subrs.length + i) (by omega)
+
+          have hidx_in_A := List.getElem_append_right' B_subrs hi
+          simp [B_hlen, Nat.add_comm, Nat.add_left_comm] at *
+          exact hwell_formed_app)
+        Outcome.Yielded hB_cont
+      clear hA_ih
+
+      obtain ⟨A_outcome, hA_co⟩ := hA_app
+
+      cases A_outcome
+      . simp at hA_co
+        refine ⟨Outcome.Yielded, ?_⟩
+        simp
+        have stmt_co_is_seq : stmt_co = .Sequence A_stmt_co B_stmt_co := by
+          subst hindex B_hindex A_hindex
+          simp_all only [Subtype.mk.injEq, Prod.mk.injEq, true_and]
+        rw [stmt_co_is_seq]
+        apply CoroutineStep.SequenceEarlyYield A_stmt_co B_stmt_co s u hA_co
+      . simp at hA_co
+        refine ⟨Outcome.Yielded, ?_⟩
+        simp
+        have stmt_co_is_seq : stmt_co = .Sequence A_stmt_co B_stmt_co := by
+          subst hindex B_hindex A_hindex
+          simp_all only [Subtype.mk.injEq, Prod.mk.injEq, true_and]
+        rw [stmt_co_is_seq]
+        apply CoroutineStep.SequenceNormal A_stmt_co B_stmt_co s b u Outcome.Yielded hA_co hB_co
+
+    . simp at hB_co
+      have hB_cont : @CoroutineStep n k program (StmtCo.Sequence B_stmt_co cont, b) u cont_outcome := by
         apply CoroutineStep.SequenceNormal B_stmt_co cont b c u cont_outcome hB_co hcont
 
 
-    -- then, apply hA's inductive hypothesis
-    simp at A_hindex B_hindex B_hlen
-    simp [countSuspendsStmt] at hbound hindex
-    have hA_app := hA_ih
-      A (StmtCo.Sequence B_stmt_co cont) B_subr_index
-      (by
-        rw [B_hindex]
-        omega)
-      s (by rfl)
-      A_stmt_co A_subrs A_subr_index A_hindex A_hlen A_heq
-      (by
-        intro i hi
-        subst B_subr_index
-        have hidx : B_subrs.length + i < (B_subrs ++ A_subrs).length := by
-          simp [List.length_append]
-          omega
-        have hwell_formed_app := hwell_formed
-          (B_subrs.length + i) (by omega)
+      -- then, apply hA's inductive hypothesis
+      simp at A_hindex B_hindex B_hlen
+      simp [countSuspendsStmt] at hbound hindex
+      have hA_app := hA_ih
+        A (StmtCo.Sequence B_stmt_co cont) B_subr_index
+        (by
+          rw [B_hindex]
+          omega)
+        s (by rfl)
+        A_stmt_co A_subrs A_subr_index A_hindex A_hlen A_heq
+        (by
+          intro i hi
+          subst B_subr_index
+          have hidx : B_subrs.length + i < (B_subrs ++ A_subrs).length := by
+            simp [List.length_append]
+            omega
+          have hwell_formed_app := hwell_formed
+            (B_subrs.length + i) (by omega)
 
-        have hidx_in_A := List.getElem_append_right' B_subrs hi
-        simp [B_hlen, Nat.add_comm, Nat.add_left_comm] at *
-        exact hwell_formed_app)
-      B_then_cont_outcome hB_cont
-    clear hA_ih
+          have hidx_in_A := List.getElem_append_right' B_subrs hi
+          simp [B_hlen, Nat.add_comm, Nat.add_left_comm] at *
+          exact hwell_formed_app)
+        cont_outcome hB_cont
+      clear hA_ih
 
-    obtain ⟨A_outcome, hA_co⟩ := hA_app
-    let A_then_B_then_cont_outcome : Outcome :=
-      match A_outcome, B_then_cont_outcome with
-      | .Yielded, _ => .Yielded
-      | .Completed, B_then_cont_outcome => B_then_cont_outcome
+      obtain ⟨A_outcome, hA_co⟩ := hA_app
 
-    refine ⟨A_then_B_then_cont_outcome, ?_⟩
-    cases A_outcome <;> cases B_outcome <;> cases cont_outcome
-    . split at B_then_cont_outcome
-    sorry
+      cases A_outcome
+      . simp at hA_co
+        refine ⟨Outcome.Yielded, ?_⟩
+        simp
+        have stmt_co_is_seq : stmt_co = .Sequence A_stmt_co B_stmt_co := by
+          subst hindex B_hindex A_hindex
+          simp_all only [Subtype.mk.injEq, Prod.mk.injEq, true_and]
+        rw [stmt_co_is_seq]
+        apply CoroutineStep.SequenceEarlyYield A_stmt_co B_stmt_co s u hA_co
+      . simp at hA_co
+        refine ⟨Outcome.Completed, ?_⟩
+        simp
+        have stmt_co_is_seq : stmt_co = .Sequence A_stmt_co B_stmt_co := by
+          subst hindex B_hindex A_hindex
+          simp_all only [Subtype.mk.injEq, Prod.mk.injEq, true_and]
+        rw [stmt_co_is_seq]
+        apply CoroutineStep.SequenceNormal A_stmt_co B_stmt_co s b c Outcome.Completed hA_co hB_co
 
 
 
   | IfTrue cond body s' t' hcond hbody hbody_ih =>
-    sorry
+    have hstmt : stmt = StmtExt.If cond body := by
+      subst hindex
+      simp_all only [Prod.mk.injEq, and_imp, forall_apply_eq_imp_iff]
+    have hs' : s' = s := by
+      subst hindex hstmt
+      simp_all only [Prod.mk.injEq, and_imp, forall_apply_eq_imp_iff, true_and]
+    subst s'
+    subst stmt
+    clear hcfg
+
+    rw [splitStmt] at hsplit
+    split at hsplit
+    rename_i body_result body_stmt_co body_subrs body_subr_index body_hindex body_hlen body_heq
+    clear body_result
+
+    have hbody_ih_app := hbody_ih
+      body cont subr_index
+      (by simp [countSuspendsStmt] at hbound; omega)
+      s (by rfl)
+      body_stmt_co body_subrs body_subr_index
+      body_hindex body_hlen body_heq
+      (by
+        have body_subrs_is_subrs : body_subrs = subrs := by
+          subst hindex
+          simp_all only [Prod.mk.injEq, and_imp, forall_apply_eq_imp_iff, Subtype.mk.injEq]
+        subst body_subrs
+        exact hwell_formed)
+      cont_outcome hcont
+    clear hbody_ih
+
+    have stmt_co_is_if : stmt_co = StmtCo.If cond body_stmt_co := by
+      subst hindex
+      simp_all only [Subtype.mk.injEq, Prod.mk.injEq]
+
+    obtain ⟨body_outcome, hbody_co⟩ := hbody_ih_app
+    cases body_outcome
+    . simp_all
+      refine ⟨Outcome.Yielded, ?_⟩
+      simp
+      apply CoroutineStep.IfTrue
+      . exact hcond
+      . exact hbody_co
+    . simp_all
+      refine ⟨Outcome.Completed, ?_⟩
+      simp
+      apply CoroutineStep.IfTrue
+      . exact hcond
+      . exact hbody_co
+
+
   | IfFalse cond body s' hcond =>
     refine ⟨Outcome.Completed, ?_⟩
     simp
