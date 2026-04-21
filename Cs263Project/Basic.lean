@@ -325,75 +325,6 @@ def test_0_split : @ProgramCo 5 1 := split ⟨test_0⟩
 end tests
 
 -- ==========================================================================
--- helper lemmas
--- ==========================================================================
-
--- semantic associativity of Sequence (right-rotation)
-lemma coroutineSeqAssocLR {program : @ProgramCo n k}
-    {A B C : @StmtCo n k} {s u : @State n} {out : Outcome}
-    (h : @CoroutineStep n k program (StmtCo.Sequence A (StmtCo.Sequence B C), s) u out) :
-    @CoroutineStep n k program (StmtCo.Sequence (StmtCo.Sequence A B) C, s) u out := by
-  cases h with
-  | SequenceNormal _ _ _ b _ _ hA hBC =>
-    cases hBC with
-    | SequenceNormal _ _ _ b' _ _ hB hC =>
-      exact CoroutineStep.SequenceNormal _ _ _ b' _ _
-        (CoroutineStep.SequenceNormal _ _ _ b _ _ hA hB) hC
-    | SequenceEarlyYield _ _ _ _ hB =>
-      exact CoroutineStep.SequenceEarlyYield _ _ _ _
-        (CoroutineStep.SequenceNormal _ _ _ b _ _ hA hB)
-  | SequenceEarlyYield _ _ _ _ hA =>
-    exact CoroutineStep.SequenceEarlyYield _ _ _ _
-      (CoroutineStep.SequenceEarlyYield _ _ _ _ hA)
-
--- semantic associativity of Sequence (left-rotation)
-lemma coroutineSeqAssocRL {program : @ProgramCo n k}
-    {A B C : @StmtCo n k} {s u : @State n} {out : Outcome}
-    (h : @CoroutineStep n k program (StmtCo.Sequence (StmtCo.Sequence A B) C, s) u out) :
-    @CoroutineStep n k program (StmtCo.Sequence A (StmtCo.Sequence B C), s) u out := by
-  cases h with
-  | SequenceNormal _ _ _ _ _ _ hAB hC =>
-    cases hAB with
-    | SequenceNormal _ _ _ a _ _ hA hB =>
-      exact CoroutineStep.SequenceNormal _ _ _ a _ _ hA
-        (CoroutineStep.SequenceNormal _ _ _ _ _ _ hB hC)
-  | SequenceEarlyYield _ _ _ _ hAB =>
-    cases hAB with
-    | SequenceNormal _ _ _ a _ _ hA hB =>
-      exact CoroutineStep.SequenceNormal _ _ _ a _ _ hA
-        (CoroutineStep.SequenceEarlyYield _ _ _ _ hB)
-    | SequenceEarlyYield _ _ _ _ hA =>
-      exact CoroutineStep.SequenceEarlyYield _ _ _ _ hA
-
--- Skip can only step from a state to itself with outcome Completed
-lemma skipCoroutineStep {program : @ProgramCo n k} {s u : @State n} {out : Outcome}
-    (h : @CoroutineStep n k program (StmtCo.Skip, s) u out) :
-    u = s ∧ out = Outcome.Completed := by
-  sorry
-
--- continuation-independence: the stmt_co produced by splitStmt does not depend on cont,
--- only on the stmt and the starting subroutine index.
-lemma splitStmt_result_cont_indep (stmt : @StmtExt n) :
-    ∀ (cont1 cont2 : @StmtCo n k) (idx : ℕ)
-      (hb1 : idx + countSuspendsStmt stmt ≤ k)
-      (hb2 : idx + countSuspendsStmt stmt ≤ k),
-      (splitStmt stmt cont1 idx hb1).val.1 = (splitStmt stmt cont2 idx hb2).val.1 := by
-  induction stmt with
-  | ShallowInstr id =>
-    intros; rfl
-  | Sequence head tail ih_head ih_tail =>
-    intro cont1 cont2 idx hb1 hb2
-    -- all the sub-calls have the same indices (by property) and continuation-free stmt_cos
-    sorry
-  | If cond body ih =>
-    intro cont1 cont2 idx hb1 hb2
-    sorry
-  | Loop cond body _ih =>
-    intros; sorry
-  | Suspend =>
-    intros; rfl
-
--- ==========================================================================
 -- Main simulation lemma: running (split_result; cont) under coroutine semantics
 -- reaches the same end state as cont does from the straight-line final state.
 -- ==========================================================================
@@ -659,7 +590,53 @@ lemma splitStmtSimulation
     apply CoroutineStep.IfFalse
     exact hcond
   | LoopContinue cond body s' t' u' hcond hbody hrest hbody_ih hrest_ih =>
+    have hstmt : stmt = StmtExt.Loop cond body := by
+      subst hindex
+      simp_all only [Prod.mk.injEq, and_imp, forall_apply_eq_imp_iff]
+    have hs' : s' = s := by
+      subst hindex hstmt
+      simp_all only [Prod.mk.injEq, and_imp, forall_apply_eq_imp_iff, true_and]
+    subst s'
+    subst stmt
+    clear hcfg
+
+    have hrest_ih_app := hrest_ih
+      (StmtExt.Loop cond body) cont subr_index hbound
+      t' (by rfl)
+      stmt_co subrs new_subr_index hindex hlen hsplit
+      hwell_formed cont_outcome hcont
+    clear hrest_ih
+
+    rw [splitStmt] at hsplit
+    split at hsplit
+    rename_i body_result body_stmt_co body_subrs body_subr_index body_hindex body_hlen body_heq
+    clear body_result
+
+    have itwantsthis : @CoroutineStep n k program ((StmtCo.Sequence (StmtCo.Loop cond (splitStmt body StmtCo.Skip subr_index hbound).val.1) cont), t') u cont_outcome := by sorry
+    have hbody_ih_app := hbody_ih
+      body
+      (StmtCo.Sequence (StmtCo.Loop cond (splitStmt body StmtCo.Skip subr_index hbound).val.1) cont)
+      subr_index
+      (by simp [countSuspendsStmt] at hbound; omega)
+      s (by rfl)
+      body_stmt_co body_subrs body_subr_index
+      body_hindex body_hlen body_heq
+      (by
+        have body_subrs_is_subrs : body_subrs = subrs := by
+          subst hindex
+          simp_all only [Prod.mk.injEq, and_imp, forall_apply_eq_imp_iff, Subtype.mk.injEq]
+        subst body_subrs
+        exact hwell_formed)
+      cont_outcome itwantsthis
+    clear hbody_ih
+
+    have stmt_co_is_loop : stmt_co = StmtCo.Loop cond body_stmt_co := by
+      subst hindex
+      simp_all only [Prod.mk.injEq, Subtype.mk.injEq]
+    subst stmt_co
+
     sorry
+
   | LoopTerminate cond body s' hcond =>
     refine ⟨Outcome.Completed, ?_⟩
     simp
