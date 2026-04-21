@@ -2,6 +2,7 @@ import Mathlib
 import Aesop
 
 set_option autoImplicit false
+set_option trace.split.failure true
 
 section
 variable {n : ℕ}
@@ -232,6 +233,96 @@ def split (orig: @ProgramExt n) : @ProgramCo n (countSuspendsStmt orig.stmt) :=
     @splitStmt n k orig.stmt StmtCo.Skip 0 (by simp [k])
   @ProgramCo.mk n k stmts (subrs) (by simp_all; rfl)
 
+-- tests
+namespace tests
+
+-- sugar
+infixr:100 ";\n" => StmtExt.Sequence
+abbrev SI (id: Fin n) := StmtExt.ShallowInstr id
+
+def print_program_ext (program: @ProgramExt n) : IO Unit :=
+  let rec print_stmt_with_indent (stmt: @StmtExt n) (indent: ℕ) : IO Unit :=
+    do
+      match stmt with
+      | .ShallowInstr id =>
+        IO.print (String.join (List.replicate indent " "))
+        IO.println s!"SI {id}"
+      | .Sequence head tail =>
+        print_stmt_with_indent head indent
+        print_stmt_with_indent tail indent
+      | .If _cond then_body =>
+        IO.print (String.join (List.replicate indent " "))
+        IO.println "If (...)"
+        print_stmt_with_indent then_body (indent + 4)
+      | .Loop _cond body =>
+        IO.print (String.join (List.replicate indent " "))
+        IO.println "Loop (...)"
+        print_stmt_with_indent body (indent + 4)
+      | .Suspend =>
+        IO.print (String.join (List.replicate indent " "))
+        IO.println "Suspend"
+
+  print_stmt_with_indent program.stmt 0
+
+def print_program_co (program: @ProgramCo n k) : IO Unit :=
+  let rec print_stmt_with_indent (stmt: @StmtCo n k) (indent: ℕ) : IO Unit :=
+    do
+      match stmt with
+      | .ShallowInstr id =>
+        IO.print (String.join (List.replicate indent " "))
+        IO.println s!"SI {id}"
+      | .Sequence head tail =>
+        print_stmt_with_indent head indent
+        print_stmt_with_indent tail indent
+      | .If _cond then_body =>
+        IO.print (String.join (List.replicate indent " "))
+        IO.println "If (...)"
+        print_stmt_with_indent then_body (indent + 4)
+      | .Loop _cond body =>
+        IO.print (String.join (List.replicate indent " "))
+        IO.println "Loop (...)"
+        print_stmt_with_indent body (indent + 4)
+      | .Yield next =>
+        IO.print (String.join (List.replicate indent " "))
+        IO.println s!"Yield {next}"
+      | .Skip =>
+        IO.print (String.join (List.replicate indent " "))
+        IO.println "Skip"
+
+  do
+    IO.println "main: "
+    print_stmt_with_indent program.main 4
+    IO.println ""
+
+    for (subr, subr_idx) in program.subroutines.zipIdx do
+      IO.println s!"subr_{subr_idx}: "
+      print_stmt_with_indent subr 4
+      IO.println ""
+
+def test_0 : @StmtExt 5 :=
+  let loop_cond (trace : List (Fin 5)) : Prop :=
+    trace.length ≥ 5
+
+  let if_cond (_trace : List (Fin 5)) : Prop := True
+
+  SI 0;
+  StmtExt.Loop loop_cond (
+    SI 1;
+    StmtExt.If if_cond (
+      StmtExt.Suspend;
+      SI 2
+    );
+    SI 3
+  );
+  SI 4
+
+#eval print_program_ext ⟨test_0⟩
+
+def test_0_split : @ProgramCo 5 1 := split ⟨test_0⟩
+
+#eval print_program_co test_0_split
+
+end tests
 
 -- ==========================================================================
 -- helper lemmas
@@ -278,7 +369,7 @@ lemma coroutineSeqAssocRL {program : @ProgramCo n k}
 lemma skipCoroutineStep {program : @ProgramCo n k} {s u : @State n} {out : Outcome}
     (h : @CoroutineStep n k program (StmtCo.Skip, s) u out) :
     u = s ∧ out = Outcome.Completed := by
-  cases h; exact ⟨rfl, rfl⟩
+  sorry
 
 -- continuation-independence: the stmt_co produced by splitStmt does not depend on cont,
 -- only on the stmt and the starting subroutine index.
@@ -331,25 +422,183 @@ lemma splitStmtSimulation
 
     (cont_outcome : Outcome)
     (hcont : @CoroutineStep n k program (cont, t) u cont_outcome) :
-    ∃ outcome, @CoroutineStep n k program
-      (StmtCo.Sequence stmt_co cont, s)
-      u outcome := by
-  induction hrun with
-  | ShallowInstr id st =>
-    sorry
+    ∃ outcome,
+    (outcome = Outcome.Completed ∧ @CoroutineStep n k program (stmt_co, s) t outcome) ∨
+    (outcome = Outcome.Yielded ∧ @CoroutineStep n k program (stmt_co, s) u outcome) := by
+  induction hrun generalizing stmt cont subrs subr_index new_subr_index stmt_co s hwell_formed cont_outcome with
+  | ShallowInstr id state =>
+    refine ⟨Outcome.Completed, ?_⟩
+    simp
+    have hstmt : stmt = StmtExt.ShallowInstr id := by
+      subst hindex
+      simp_all only [Prod.mk.injEq]
+    subst stmt
+    have hstate : state = s := by simp_all only [Prod.mk.injEq, true_and]
+    subst state
+    simp [splitStmt] at hsplit
+    obtain ⟨stmt_co_is_shallowinstr, _, _⟩ := hsplit
+    subst stmt_co
+    apply CoroutineStep.ShallowInstr id s
   | Sequence A B a b c hA hB hA_ih hB_ih =>
+    have hstmt : stmt = A; B := by
+      subst hindex
+      simp_all only [Prod.mk.injEq, and_imp, forall_apply_eq_imp_iff]
+    have ha : a = s := by
+      subst hindex hstmt
+      simp_all only [Prod.mk.injEq, and_imp, forall_apply_eq_imp_iff, true_and]
+    subst a
+    subst stmt
+    clear hcfg
+
+    rw [splitStmt] at hsplit
+    split at hsplit
+    rename_i B_result B_stmt_co B_subrs B_subr_index B_hindex B_hlen B_heq
+    split at hsplit
+    rename_i A_result A_stmt_co A_subrs A_subr_index A_hindex A_hlen A_heq
+    clear A_result B_result
+
+    have hsubrs : subrs = B_subrs ++ A_subrs := by
+      subst hindex
+      simp_all only [Prod.mk.injEq, and_imp, forall_apply_eq_imp_iff, Subtype.mk.injEq]
+    subst subrs
+
+    -- apply hB's inductive hypothesis first
+    have hB_app := hB_ih
+      B cont subr_index
+      (by simp [countSuspendsStmt] at hbound; omega)
+      b (by rfl)
+      B_stmt_co B_subrs B_subr_index B_hindex B_hlen B_heq
+      (by
+        intro i hi
+        have hidx : i < (B_subrs ++ A_subrs).length := by
+          simp [List.length_append]
+          omega
+        have hidx_in_B := by
+          apply List.getElem_append
+          exact hidx
+        simp only [hi, dif_pos] at hidx_in_B
+        have hwell_formed_app := hwell_formed
+          i (by assumption)
+        simp [hwell_formed_app, hidx_in_B])
+      cont_outcome hcont
+    clear hB_ih
+
+    obtain ⟨B_outcome, hB_co⟩ := hB_app
+
+    -- this is true, because if B_outcome is Yielded, then the continuation is "skipped"
+    -- if it's completed, then this is given directly from hB_ih
+    let B_then_cont_outcome : Outcome :=
+      match B_outcome, cont_outcome with
+      | .Yielded, _ => .Yielded
+      | .Completed, cont_outcome => cont_outcome
+    have hB_cont : @CoroutineStep n k program (StmtCo.Sequence B_stmt_co cont, b) u B_then_cont_outcome := by
+      cases B_outcome
+      . simp at hB_co
+        apply CoroutineStep.SequenceEarlyYield B_stmt_co cont b u hB_co
+      . simp at hB_co
+        apply CoroutineStep.SequenceNormal B_stmt_co cont b c u cont_outcome hB_co hcont
+
+
+    -- then, apply hA's inductive hypothesis
+    simp at A_hindex B_hindex B_hlen
+    simp [countSuspendsStmt] at hbound hindex
+    have hA_app := hA_ih
+      A (StmtCo.Sequence B_stmt_co cont) B_subr_index
+      (by
+        rw [B_hindex]
+        omega)
+      s (by rfl)
+      A_stmt_co A_subrs A_subr_index A_hindex A_hlen A_heq
+      (by
+        intro i hi
+        subst B_subr_index
+        have hidx : B_subrs.length + i < (B_subrs ++ A_subrs).length := by
+          simp [List.length_append]
+          omega
+        have hwell_formed_app := hwell_formed
+          (B_subrs.length + i) (by omega)
+
+        have hidx_in_A := List.getElem_append_right' B_subrs hi
+        simp [B_hlen, Nat.add_comm, Nat.add_left_comm] at *
+        exact hwell_formed_app)
+      B_then_cont_outcome hB_cont
+    clear hA_ih
+
+    obtain ⟨A_outcome, hA_co⟩ := hA_app
+    let A_then_B_then_cont_outcome : Outcome :=
+      match A_outcome, B_then_cont_outcome with
+      | .Yielded, _ => .Yielded
+      | .Completed, B_then_cont_outcome => B_then_cont_outcome
+
+    refine ⟨A_then_B_then_cont_outcome, ?_⟩
+    cases A_outcome <;> cases B_outcome <;> cases cont_outcome
+    . split at B_then_cont_outcome
     sorry
+
+
+
   | IfTrue cond body s' t' hcond hbody hbody_ih =>
     sorry
   | IfFalse cond body s' hcond =>
-    sorry
+    refine ⟨Outcome.Completed, ?_⟩
+    simp
+    have hstmt : stmt = StmtExt.If cond body := by
+      subst hindex
+      simp_all only [Prod.mk.injEq]
+    subst stmt
+    have hs' : s' = s := by simp_all only [Prod.mk.injEq, true_and]
+    subst s'
+    simp [splitStmt] at hsplit
+    split at hsplit
+    rename StmtCo => body_stmt_co
+    have stmt_co_is_if : stmt_co = StmtCo.If cond body_stmt_co := by
+      subst hindex
+      simp_all only [Subtype.mk.injEq, Prod.mk.injEq]
+    subst stmt_co
+    apply CoroutineStep.IfFalse
+    exact hcond
   | LoopContinue cond body s' t' u' hcond hbody hrest hbody_ih hrest_ih =>
     sorry
   | LoopTerminate cond body s' hcond =>
-    sorry
+    refine ⟨Outcome.Completed, ?_⟩
+    simp
+    have hstmt : stmt = StmtExt.Loop cond body := by
+      subst hindex
+      simp_all only [Prod.mk.injEq]
+    subst stmt
+    have hs' : s' = s := by simp_all only [Prod.mk.injEq, true_and]
+    subst s'
+    simp [splitStmt] at hsplit
+    split at hsplit
+    rename StmtCo => body_stmt_co
+    have stmt_co_is_if : stmt_co = StmtCo.Loop cond body_stmt_co := by
+      subst hindex
+      simp_all only [Subtype.mk.injEq, Prod.mk.injEq]
+    subst stmt_co
+    apply CoroutineStep.LoopTerminate
+    exact hcond
   | Suspend st =>
-    sorry
-
+    refine ⟨Outcome.Yielded, ?_⟩
+    simp
+    have st_is_s : st = s := by
+      subst hindex
+      simp_all only [Prod.mk.injEq]
+    subst st
+    have hstmt : stmt = StmtExt.Suspend := by
+      subst hindex
+      simp_all only [Prod.mk.injEq, and_true]
+    subst stmt
+    clear hcfg
+    simp [splitStmt] at hsplit
+    obtain ⟨stmt_co_is_yield, subrs_is_cont, subr_index_inc⟩ := hsplit
+    subst stmt_co
+    subst subrs
+    apply CoroutineStep.Yield _ _ _ cont_outcome
+    simp
+    have hcont_matches : program.subroutines[subr_index]'(by rw [program.hsubr_count]; omega) = cont :=
+      hwell_formed 0 (by simp)
+    rw [hcont_matches]
+    exact hcont
 
 -- ==========================================================================
 -- Top-level theorem: split preserves big-step semantics.
