@@ -1,5 +1,5 @@
 [GitHub Repo](https://github.com/buggy213/cs263-project)
-[This document with pictures](https://github.com/buggy213/cs263-project/blob/master/proposal.md)
+[This document with pictures](https://github.com/buggy213/cs263-project/blob/master/docs/check-in.md)
 
 # Project Idea
 Investigate a basic formalization of a stackless, asymmetric coroutine splitting transform (inspired by the coroutine splitting from the LuisaCompute project, which is detailed in [[1]](https://cg.cs.tsinghua.edu.cn/people/~kun/2024/GPUCoroutines.pdf)). This part hasn't changed since I started
