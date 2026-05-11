@@ -441,6 +441,57 @@ def run_program_co (fuel: ℕ) (program: @ProgramCo n k) (initial_state: @State 
   | none => "didn't terminate"
   | some ⟨final_state, _, _⟩ => s!"{final_state.trace}"
 
+-- Claude-generated factorial function
+-- n = 4: 0=input, 1=round marker, 2=copy marker, 3=accumulator
+-- after each round-marker (1), the accumulator (3) for that round
+-- is written between this marker and the next.
+
+-- "count of x after the last occurrence of y"
+def tail_count (t : List (Fin 4)) (x y : Fin 4) : ℕ :=
+  (t.reverse.takeWhile (· ≠ y)).count x
+
+-- "count of x between the second-to-last and last y"
+def prev_chunk_count (t : List (Fin 4)) (x y : Fin 4) : ℕ :=
+  let r := t.reverse
+  let after_last := (r.dropWhile (· ≠ y)).tail
+  (after_last.takeWhile (· ≠ y)).count x
+
+def factorial : @StmtExt 4 :=
+  SI 1;          -- seed first round-marker with accumulator = 1 (one '3' below)
+  SI 3;          -- f₀ = 1
+  StmtExt.Loop ⟨fun t => t.count 1 - 1 < t.count 0⟩ (
+    SI 1;        -- new round; previous chunk holds old f
+    -- suspend at the start of every round
+    StmtExt.Suspend;
+    StmtExt.Loop ⟨fun t => tail_count t 2 1 < t.count 1 - 1⟩ (
+      SI 2;      -- inner outer: do (i) copies of old f
+      -- suspend on the first middle iteration of every even-indexed round
+      StmtExt.If ⟨fun t => tail_count t 2 1 = 1 ∧ t.count 1 % 2 = 0⟩ (
+        StmtExt.Suspend
+      );
+      StmtExt.Loop ⟨fun t => tail_count t 3 2 < prev_chunk_count t 3 1⟩ (
+        SI 3     -- copy one unit of old f into new chunk
+      )
+    )
+  )
+
+def factorial_co : @ProgramCo 4 2 := split ⟨factorial⟩
+
+def unary_five : List (Fin 4) := [0, 0, 0, 0, 0]
+def five_factorial := run_stmt_ext 100000 factorial ⟨unary_five⟩
+def five_factorial_result : ℕ := match five_factorial with
+  | .none => 0
+  | .some ⟨final_state, _⟩ => tail_count final_state.trace 3 1
+
+def five_factorial_co := run_program_co 100000 factorial_co ⟨unary_five⟩
+def five_factorial_co_result : ℕ := match five_factorial_co with
+  | .none => 0
+  | .some ⟨final_state, _, _⟩ => tail_count final_state.trace 3 1
+
+#eval five_factorial_result
+#eval five_factorial_co_result
+#guard five_factorial_result = five_factorial_co_result ∧ five_factorial_result ≠ 0
+
 end tests
 
 -- ==========================================================================
