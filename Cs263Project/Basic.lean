@@ -8,14 +8,18 @@ section
 variable {n : ℕ}
 variable {k : ℕ}
 
+structure DecidableCond (n : ℕ) where
+  pred: List (Fin n) → Prop
+  [dec : DecidablePred pred]
+
 inductive StmtExt : Type where
   | ShallowInstr (id: Fin n)
   | Sequence (head: StmtExt) (tail: StmtExt)
   | If
-    (cond: List (Fin n) → Prop)
+    (cond: DecidableCond n)
     (then_body: StmtExt)
   | Loop
-    (cond: List (Fin n) → Prop)
+    (cond: DecidableCond n)
     (body: StmtExt)
   | Suspend
 
@@ -32,10 +36,10 @@ inductive StmtCo : Type where
   | ShallowInstr (id: Fin n)
   | Sequence (head: StmtCo) (tail: StmtCo)
   | If
-    (cond: List (Fin n) → Prop)
+    (cond: DecidableCond n)
     (then_body: StmtCo)
   | Loop
-    (cond: List (Fin n) → Prop)
+    (cond: DecidableCond n)
     (body: StmtCo)
   | Yield (next: Fin k)
   | Skip
@@ -54,24 +58,24 @@ inductive StraightLineStep : (StmtExt × State) → State → Prop where
   (hA : StraightLineStep (A, a) b)
   (hB : StraightLineStep (B, b) c) :
   StraightLineStep (StmtExt.Sequence A B, a) c
-| IfTrue (cond: List (Fin n) → Prop) (then_body: StmtExt)
+| IfTrue (cond: DecidableCond n) (then_body: StmtExt)
   (s t: State)
-  (hcond : cond s.trace)
+  (hcond : cond.pred s.trace)
   (hbody : StraightLineStep (then_body, s) t) :
   StraightLineStep (StmtExt.If cond then_body, s) t
-| IfFalse (cond: List (Fin n) → Prop) (then_body: StmtExt)
+| IfFalse (cond: DecidableCond n) (then_body: StmtExt)
   (s: State)
-  (hcond: ¬(cond s.trace)) :
+  (hcond: ¬(cond.pred s.trace)) :
   StraightLineStep (StmtExt.If cond then_body, s) s
-| LoopContinue (cond: List (Fin n) → Prop) (body: StmtExt)
+| LoopContinue (cond: DecidableCond n) (body: StmtExt)
   (s t u: State)
-  (hcond : cond s.trace)
+  (hcond : cond.pred s.trace)
   (hbody : StraightLineStep (body, s) t)
   (hrest : StraightLineStep (StmtExt.Loop cond body, t) u) :
   StraightLineStep (StmtExt.Loop cond body, s) u
-| LoopTerminate (cond: List (Fin n) → Prop) (body: StmtExt)
+| LoopTerminate (cond: DecidableCond n) (body: StmtExt)
   (s: State)
-  (hcond : ¬(cond s.trace)) :
+  (hcond : ¬(cond.pred s.trace)) :
   StraightLineStep (StmtExt.Loop cond body, s) s
 | Suspend (s: State) :
   StraightLineStep (StmtExt.Suspend, s) s
@@ -94,31 +98,31 @@ inductive CoroutineStep {program: @ProgramCo n k} : ((@StmtCo n k) × (@State n)
   (a b : State)
   (hA : @CoroutineStep program (A, a) b Outcome.Yielded) :
   CoroutineStep (StmtCo.Sequence A B, a) b Outcome.Yielded
-| IfTrue (cond: List (Fin n) → Prop) (then_body: StmtCo)
+| IfTrue (cond: DecidableCond n) (then_body: StmtCo)
   (s t: State)
-  (hcond : cond s.trace)
+  (hcond : cond.pred s.trace)
   (body_outcome: Outcome)
   (hbody : @CoroutineStep program (then_body, s) t body_outcome) :
   CoroutineStep (StmtCo.If cond then_body, s) t body_outcome
-| IfFalse (cond: List (Fin n) → Prop) (then_body: StmtCo)
+| IfFalse (cond: DecidableCond n) (then_body: StmtCo)
   (s: State)
-  (hcond: ¬(cond s.trace)) :
+  (hcond: ¬(cond.pred s.trace)) :
   CoroutineStep (StmtCo.If cond then_body, s) s Outcome.Completed
-| LoopContinueNormal (cond: List (Fin n) → Prop) (body: StmtCo)
+| LoopContinueNormal (cond: DecidableCond n) (body: StmtCo)
   (s t u: State)
-  (hcond : cond s.trace)
+  (hcond : cond.pred s.trace)
   (rest_outcome : Outcome)
   (hbody : @CoroutineStep program (body, s) t Outcome.Completed)
   (hrest : @CoroutineStep program (StmtCo.Loop cond body, t) u rest_outcome) :
   CoroutineStep (StmtCo.Loop cond body, s) u rest_outcome
-| LoopEarlyYield (cond: List (Fin n) → Prop) (body: StmtCo)
+| LoopEarlyYield (cond: DecidableCond n) (body: StmtCo)
   (s t: State)
-  (hcond : cond s.trace)
+  (hcond : cond.pred s.trace)
   (hbody: @CoroutineStep program (body, s) t Outcome.Yielded) :
   CoroutineStep (StmtCo.Loop cond body, s) t Outcome.Yielded
-| LoopTerminate (cond: List (Fin n) → Prop) (body: StmtCo)
+| LoopTerminate (cond: DecidableCond n) (body: StmtCo)
   (s: State)
-  (hcond : ¬(cond s.trace)) :
+  (hcond : ¬(cond.pred s.trace)) :
   CoroutineStep (StmtCo.Loop cond body, s) s Outcome.Completed
 | Yield (next: Fin k)
   (s t: State)
@@ -300,10 +304,11 @@ def print_program_co (program: @ProgramCo n k) : IO Unit :=
       IO.println ""
 
 def test_0 : @StmtExt 5 :=
-  let loop_cond (trace : List (Fin 5)) : Prop :=
-    trace.length ≥ 5
+  let loop_cond : DecidableCond 5 :=
+    { pred := fun trace => trace.length ≥ 5 }
 
-  let if_cond (_trace : List (Fin 5)) : Prop := True
+  let if_cond : DecidableCond 5 :=
+    { pred := fun _ => True }
 
   SI 0;
   StmtExt.Loop loop_cond (
@@ -321,6 +326,120 @@ def test_0 : @StmtExt 5 :=
 def test_0_split : @ProgramCo 5 1 := split ⟨test_0⟩
 
 #eval print_program_co test_0_split
+
+
+-- provide final state + proof that this is correct according to operational semantics above
+def run_stmt_ext (fuel: ℕ) (stmt: @StmtExt n) (initial_state: @State n) :
+  Option {final_state: @State n // StraightLineStep (stmt, initial_state) final_state} :=
+
+  match fuel, stmt with
+  | 0, _ => .none
+  | _, .ShallowInstr id =>
+    let final_state := initial_state.update id
+    let pf := StraightLineStep.ShallowInstr id initial_state
+    .some { val := final_state, property := pf }
+  | f, .Sequence head tail => do
+    let ⟨mid_state, mid_pf⟩ ← run_stmt_ext f head initial_state
+    let ⟨final_state, final_pf⟩ ← run_stmt_ext f tail mid_state
+    let pf := StraightLineStep.Sequence head tail initial_state mid_state final_state mid_pf final_pf
+    .some { val := final_state, property := pf }
+  | f, .If cond body => do
+    let cond_eval := (cond.dec initial_state.trace)
+    if hcond : cond.pred initial_state.trace then
+      let ⟨body_state, body_pf⟩ ← run_stmt_ext f body initial_state
+      let pf := StraightLineStep.IfTrue cond body initial_state body_state hcond body_pf
+      .some { val := body_state, property := pf }
+    else
+      let pf := StraightLineStep.IfFalse cond body initial_state hcond
+      .some { val := initial_state, property := pf }
+  | f + 1, .Loop cond body => do
+    let cond_eval := (cond.dec initial_state.trace)
+    if hcond : cond.pred initial_state.trace then
+      let ⟨body_state, body_pf⟩ ← run_stmt_ext (f + 1) body initial_state
+      let ⟨rest_state, rest_pf⟩ ← run_stmt_ext f (StmtExt.Loop cond body) body_state
+      let pf := StraightLineStep.LoopContinue cond body initial_state body_state rest_state hcond body_pf rest_pf
+      .some { val := rest_state, property := pf }
+    else
+      let pf := StraightLineStep.LoopTerminate cond body initial_state hcond
+      .some { val := initial_state, property := pf }
+  | _, .Suspend =>
+    let pf := StraightLineStep.Suspend initial_state
+    .some { val := initial_state, property := pf }
+
+def run_program_ext (fuel: ℕ) (program: @ProgramExt n) (initial_state: @State n) :
+  Option {final_state: @State n // StraightLineStep (program.stmt, initial_state) final_state} :=
+  run_stmt_ext fuel program.stmt initial_state
+
+structure ResultCo (program: @ProgramCo n k) (stmt: @StmtCo n k) (initial_state: @State n) where
+  final_state: @State n
+  outcome: Outcome
+  pf: @CoroutineStep n k program (stmt, initial_state) final_state outcome
+
+def run_stmt_co (fuel: ℕ) (program: @ProgramCo n k) (stmt: @StmtCo n k) (initial_state: @State n) :
+  Option (ResultCo program stmt initial_state) :=
+  match fuel, stmt with
+  | 0, _ => .none
+  | _, .ShallowInstr id =>
+    let final_state := initial_state.update id
+    let pf := CoroutineStep.ShallowInstr id initial_state
+    .some { final_state, outcome := Outcome.Completed, pf }
+  | f, .Sequence head tail => do
+    -- first run head. if we yielded, don't run tail
+    let ⟨mid_state, mid_outcome, mid_pf⟩ ← run_stmt_co f program head initial_state
+    match mid_outcome with
+    | .Yielded =>
+      let pf := CoroutineStep.SequenceEarlyYield head tail initial_state mid_state mid_pf
+      .some { final_state := mid_state, outcome := Outcome.Yielded, pf }
+    | .Completed =>
+      let ⟨final_state, final_outcome, final_pf⟩ ← run_stmt_co f program tail mid_state
+      let pf := CoroutineStep.SequenceNormal
+        head tail initial_state mid_state final_state final_outcome mid_pf final_pf
+      .some { final_state, outcome := final_outcome, pf }
+  | f, .If cond body => do
+    let cond_eval := (cond.dec initial_state.trace)
+    if hcond : cond.pred initial_state.trace then
+      let ⟨body_state, body_outcome, body_pf⟩ ← run_stmt_co f program body initial_state
+      let pf := CoroutineStep.IfTrue cond body initial_state body_state hcond body_outcome body_pf
+      .some { final_state := body_state, outcome := body_outcome, pf }
+    else
+      let pf := CoroutineStep.IfFalse cond body initial_state hcond
+      .some { final_state := initial_state, outcome := Outcome.Completed, pf }
+  | f + 1, .Loop cond body => do
+    let cond_eval := (cond.dec initial_state.trace)
+    if hcond : cond.pred initial_state.trace then
+      let ⟨body_state, body_outcome, body_pf⟩ ← run_stmt_co (f + 1) program body initial_state
+      match body_outcome with
+      | .Yielded =>
+        let pf := CoroutineStep.LoopEarlyYield cond body initial_state body_state hcond body_pf
+        .some { final_state := body_state, outcome := Outcome.Yielded, pf }
+      | .Completed =>
+        let ⟨rest_state, rest_outcome, rest_pf⟩ ← run_stmt_co f program (StmtCo.Loop cond body) body_state
+        let pf := CoroutineStep.LoopContinueNormal
+          cond body initial_state body_state rest_state hcond rest_outcome body_pf rest_pf
+        .some { final_state := rest_state, outcome := rest_outcome, pf }
+    else
+      let pf := CoroutineStep.LoopTerminate cond body initial_state hcond
+      .some { final_state := initial_state, outcome := Outcome.Completed, pf }
+  | f + 1, .Yield next => do
+    let subr_stmt := program.subroutines[next]'(by simp [program.hsubr_count])
+    let ⟨subr_state, subr_outcome, subr_pf⟩ ← run_stmt_co f program subr_stmt initial_state
+    let pf := CoroutineStep.Yield next initial_state subr_state subr_outcome subr_pf
+    .some { final_state := subr_state, outcome := Outcome.Yielded, pf }
+  | _, .Skip =>
+    let pf := CoroutineStep.Skip initial_state
+    .some { final_state := initial_state, outcome := Outcome.Completed, pf }
+
+def run_program_co (fuel: ℕ) (program: @ProgramCo n k) (initial_state: @State n) :
+  Option (ResultCo program program.main initial_state) :=
+  run_stmt_co fuel program program.main initial_state
+
+#eval match run_stmt_ext 100000 test_0 ⟨[]⟩ with
+  | none => "didn't terminate"
+  | some ⟨final_state, _⟩ => s!"{final_state.trace}"
+
+#eval match run_program_co 100000 test_0_split ⟨[]⟩ with
+  | none => "didn't terminate"
+  | some ⟨final_state, _, _⟩ => s!"{final_state.trace}"
 
 end tests
 
