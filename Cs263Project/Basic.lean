@@ -245,6 +245,33 @@ namespace tests
 infixr:100 ";\n" => StmtExt.Sequence
 abbrev SI (id: Fin n) := StmtExt.ShallowInstr id
 
+-- C-style sugar. The condition expression auto-binds `t : List (Fin _)` as the trace.
+--   loop  (cond_expr) { body }
+--   loop  "label" (cond_expr) { body }
+--   when  (cond_expr) { body }
+--   when  "label" (cond_expr) { body }
+--   suspend
+syntax "loop" "(" term ")" "{" term "}" : term
+syntax "loop" str "(" term ")" "{" term "}" : term
+syntax "when" "(" term ")" "{" term "}" : term
+syntax "when" str "(" term ")" "{" term "}" : term
+syntax "suspend" : term
+
+macro_rules
+  | `(loop ($e) { $body }) => do
+    let t := Lean.mkIdent `t
+    `(StmtExt.Loop { pred := fun $t:ident => $e, comment := none } $body)
+  | `(loop $s:str ($e) { $body }) => do
+    let t := Lean.mkIdent `t
+    `(StmtExt.Loop { pred := fun $t:ident => $e, comment := some $s } $body)
+  | `(when ($e) { $body }) => do
+    let t := Lean.mkIdent `t
+    `(StmtExt.If { pred := fun $t:ident => $e, comment := none } $body)
+  | `(when $s:str ($e) { $body }) => do
+    let t := Lean.mkIdent `t
+    `(StmtExt.If { pred := fun $t:ident => $e, comment := some $s } $body)
+  | `(suspend) => `(StmtExt.Suspend)
+
 def print_program_ext (program: @ProgramExt n) : IO Unit :=
   let rec print_stmt_with_indent (stmt: @StmtExt n) (indent: ℕ) : IO Unit :=
     do
@@ -309,21 +336,15 @@ def print_program_co (program: @ProgramCo n k) : IO Unit :=
       IO.println ""
 
 def test_0 : @StmtExt 5 :=
-  let loop_cond : DecidableCond 5 :=
-    { pred := fun trace => trace.length ≥ 5, comment := "trace.length ≥ 5" }
-
-  let if_cond : DecidableCond 5 :=
-    { pred := fun _ => True, comment := "True" }
-
   SI 0;
-  StmtExt.Loop loop_cond (
+  loop "trace.length ≥ 5" (t.length ≥ 5) {
     SI 1;
-    StmtExt.If if_cond (
-      StmtExt.Suspend;
+    when "true" (True) {
+      suspend;
       SI 2
-    );
+    };
     SI 3
-  );
+  };
   SI 4
 
 #eval print_program_ext ⟨test_0⟩
@@ -464,21 +485,19 @@ def prev_chunk_count (t : List (Fin 4)) (x y : Fin 4) : ℕ :=
 def factorial : @StmtExt 4 :=
   SI 1;          -- seed first round-marker with accumulator = 1 (one '3' below)
   SI 3;          -- f₀ = 1
-  StmtExt.Loop ⟨fun t => t.count 1 - 1 < t.count 0, "count(1) - 1 < count(0)"⟩ (
+  loop "outer: i < k" (t.count 1 - 1 < t.count 0) {
     SI 1;        -- new round; previous chunk holds old f
-    -- suspend at the start of every round
-    StmtExt.Suspend;
-    StmtExt.Loop ⟨fun t => tail_count t 2 1 < t.count 1 - 1, "tail_count(2, 1) < count(1) - 1"⟩ (
-      SI 2;      -- inner outer: do (i) copies of old f
-      -- suspend on the first middle iteration of every even-indexed round
-      StmtExt.If ⟨fun t => tail_count t 2 1 = 1 ∧ t.count 1 % 2 = 0, "tail_count(2, 1) = 1 ∧ count(1) % 2 = 0"⟩ (
-        StmtExt.Suspend
-      );
-      StmtExt.Loop ⟨fun t => tail_count t 3 2 < prev_chunk_count t 3 1, "tail_count(3, 2) < prev_chunk_count(3, 1)"⟩ (
+    suspend;     -- at the start of every round
+    loop "middle: j < i" (tail_count t 2 1 < t.count 1 - 1) {
+      SI 2;      -- do (i) copies of old f
+      when "first middle iter of even round" (tail_count t 2 1 = 1 ∧ t.count 1 % 2 = 0) {
+        suspend
+      };
+      loop "inner: copy one f_prev" (tail_count t 3 2 < prev_chunk_count t 3 1) {
         SI 3     -- copy one unit of old f into new chunk
-      )
-    )
-  )
+      }
+    }
+  }
 
 def factorial_co : @ProgramCo 4 2 := split ⟨factorial⟩
 
