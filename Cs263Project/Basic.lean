@@ -11,6 +11,7 @@ variable {k : ℕ}
 structure DecidableCond (n : ℕ) where
   pred: List (Fin n) → Prop
   [dec : DecidablePred pred]
+  comment: Option String
 
 inductive StmtExt : Type where
   | ShallowInstr (id: Fin n)
@@ -254,13 +255,15 @@ def print_program_ext (program: @ProgramExt n) : IO Unit :=
       | .Sequence head tail =>
         print_stmt_with_indent head indent
         print_stmt_with_indent tail indent
-      | .If _cond then_body =>
+      | .If cond then_body =>
         IO.print (String.join (List.replicate indent " "))
-        IO.println "If (...)"
+        let cond_pp := cond.comment.getD "..."
+        IO.println s!"If ({cond_pp})"
         print_stmt_with_indent then_body (indent + 4)
-      | .Loop _cond body =>
+      | .Loop cond body =>
         IO.print (String.join (List.replicate indent " "))
-        IO.println "Loop (...)"
+        let cond_pp := cond.comment.getD "..."
+        IO.println s!"Loop ({cond_pp})"
         print_stmt_with_indent body (indent + 4)
       | .Suspend =>
         IO.print (String.join (List.replicate indent " "))
@@ -278,13 +281,15 @@ def print_program_co (program: @ProgramCo n k) : IO Unit :=
       | .Sequence head tail =>
         print_stmt_with_indent head indent
         print_stmt_with_indent tail indent
-      | .If _cond then_body =>
+      | .If cond then_body =>
         IO.print (String.join (List.replicate indent " "))
-        IO.println "If (...)"
+        let cond_pp := cond.comment.getD "..."
+        IO.println s!"If ({cond_pp})"
         print_stmt_with_indent then_body (indent + 4)
-      | .Loop _cond body =>
+      | .Loop cond body =>
         IO.print (String.join (List.replicate indent " "))
-        IO.println "Loop (...)"
+        let cond_pp := cond.comment.getD "..."
+        IO.println s!"Loop ({cond_pp})"
         print_stmt_with_indent body (indent + 4)
       | .Yield next =>
         IO.print (String.join (List.replicate indent " "))
@@ -305,10 +310,10 @@ def print_program_co (program: @ProgramCo n k) : IO Unit :=
 
 def test_0 : @StmtExt 5 :=
   let loop_cond : DecidableCond 5 :=
-    { pred := fun trace => trace.length ≥ 5 }
+    { pred := fun trace => trace.length ≥ 5, comment := "trace.length ≥ 5" }
 
   let if_cond : DecidableCond 5 :=
-    { pred := fun _ => True }
+    { pred := fun _ => True, comment := "True" }
 
   SI 0;
   StmtExt.Loop loop_cond (
@@ -459,17 +464,17 @@ def prev_chunk_count (t : List (Fin 4)) (x y : Fin 4) : ℕ :=
 def factorial : @StmtExt 4 :=
   SI 1;          -- seed first round-marker with accumulator = 1 (one '3' below)
   SI 3;          -- f₀ = 1
-  StmtExt.Loop ⟨fun t => t.count 1 - 1 < t.count 0⟩ (
+  StmtExt.Loop ⟨fun t => t.count 1 - 1 < t.count 0, "count(1) - 1 < count(0)"⟩ (
     SI 1;        -- new round; previous chunk holds old f
     -- suspend at the start of every round
     StmtExt.Suspend;
-    StmtExt.Loop ⟨fun t => tail_count t 2 1 < t.count 1 - 1⟩ (
+    StmtExt.Loop ⟨fun t => tail_count t 2 1 < t.count 1 - 1, "tail_count(2, 1) < count(1) - 1"⟩ (
       SI 2;      -- inner outer: do (i) copies of old f
       -- suspend on the first middle iteration of every even-indexed round
-      StmtExt.If ⟨fun t => tail_count t 2 1 = 1 ∧ t.count 1 % 2 = 0⟩ (
+      StmtExt.If ⟨fun t => tail_count t 2 1 = 1 ∧ t.count 1 % 2 = 0, "tail_count(2, 1) = 1 ∧ count(1) % 2 = 0"⟩ (
         StmtExt.Suspend
       );
-      StmtExt.Loop ⟨fun t => tail_count t 3 2 < prev_chunk_count t 3 1⟩ (
+      StmtExt.Loop ⟨fun t => tail_count t 3 2 < prev_chunk_count t 3 1, "tail_count(3, 2) < prev_chunk_count(3, 1)"⟩ (
         SI 3     -- copy one unit of old f into new chunk
       )
     )
