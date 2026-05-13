@@ -5,53 +5,52 @@ set_option autoImplicit false
 set_option trace.split.failure true
 
 section
-variable {n : ℕ}
 variable {k : ℕ}
 
-structure DecidableCond (n : ℕ) where
-  pred: List (Fin n) → Prop
+structure DecidableCond where
+  pred: List ℕ → Prop
   [dec : DecidablePred pred]
   comment: Option String
 
 inductive StmtExt : Type where
-  | ShallowInstr (id: Fin n)
+  | ShallowInstr (id: ℕ)
   | Sequence (head: StmtExt) (tail: StmtExt)
   | If
-    (cond: DecidableCond n)
+    (cond: DecidableCond)
     (then_body: StmtExt)
   | Loop
-    (cond: DecidableCond n)
+    (cond: DecidableCond)
     (body: StmtExt)
   | Suspend
 
 structure State where
-  trace: List (Fin n)
+  trace: List ℕ
 
-def State.update (self: @State n) (id: Fin n) : @State n :=
+def State.update (self: State) (id: ℕ) : State :=
   ⟨self.trace ++ [id]⟩
 
 structure ProgramExt where
-  stmt: @StmtExt n
+  stmt: StmtExt
 
 inductive StmtCo : Type where
-  | ShallowInstr (id: Fin n)
+  | ShallowInstr (id: ℕ)
   | Sequence (head: StmtCo) (tail: StmtCo)
   | If
-    (cond: DecidableCond n)
+    (cond: DecidableCond)
     (then_body: StmtCo)
   | Loop
-    (cond: DecidableCond n)
+    (cond: DecidableCond)
     (body: StmtCo)
   | Yield (next: Fin k)
   | Skip
 
 structure ProgramCo where
-  main: @StmtCo n k
-  subroutines: List (@StmtCo n k)
+  main: @StmtCo k
+  subroutines: List (@StmtCo k)
   hsubr_count: subroutines.length = k
 
 inductive StraightLineStep : (StmtExt × State) → State → Prop where
-| ShallowInstr (id: Fin n)
+| ShallowInstr (id: ℕ)
   (s: State) :
   StraightLineStep (StmtExt.ShallowInstr id, s) (s.update id)
 | Sequence (A B : StmtExt)
@@ -59,22 +58,22 @@ inductive StraightLineStep : (StmtExt × State) → State → Prop where
   (hA : StraightLineStep (A, a) b)
   (hB : StraightLineStep (B, b) c) :
   StraightLineStep (StmtExt.Sequence A B, a) c
-| IfTrue (cond: DecidableCond n) (then_body: StmtExt)
+| IfTrue (cond: DecidableCond) (then_body: StmtExt)
   (s t: State)
   (hcond : cond.pred s.trace)
   (hbody : StraightLineStep (then_body, s) t) :
   StraightLineStep (StmtExt.If cond then_body, s) t
-| IfFalse (cond: DecidableCond n) (then_body: StmtExt)
+| IfFalse (cond: DecidableCond) (then_body: StmtExt)
   (s: State)
   (hcond: ¬(cond.pred s.trace)) :
   StraightLineStep (StmtExt.If cond then_body, s) s
-| LoopContinue (cond: DecidableCond n) (body: StmtExt)
+| LoopContinue (cond: DecidableCond) (body: StmtExt)
   (s t u: State)
   (hcond : cond.pred s.trace)
   (hbody : StraightLineStep (body, s) t)
   (hrest : StraightLineStep (StmtExt.Loop cond body, t) u) :
   StraightLineStep (StmtExt.Loop cond body, s) u
-| LoopTerminate (cond: DecidableCond n) (body: StmtExt)
+| LoopTerminate (cond: DecidableCond) (body: StmtExt)
   (s: State)
   (hcond : ¬(cond.pred s.trace)) :
   StraightLineStep (StmtExt.Loop cond body, s) s
@@ -85,8 +84,8 @@ inductive Outcome : Type where
 | Yielded
 | Completed
 
-inductive CoroutineStep {program: @ProgramCo n k} : ((@StmtCo n k) × (@State n)) → (@State n) → Outcome → Prop where
-| ShallowInstr (id: Fin n)
+inductive CoroutineStep {program: @ProgramCo k} : ((@StmtCo k) × State) → State → Outcome → Prop where
+| ShallowInstr (id: ℕ)
   (s: State) :
   CoroutineStep (StmtCo.ShallowInstr id, s) (s.update id) Outcome.Completed
 | SequenceNormal (A B : StmtCo)
@@ -99,29 +98,29 @@ inductive CoroutineStep {program: @ProgramCo n k} : ((@StmtCo n k) × (@State n)
   (a b : State)
   (hA : @CoroutineStep program (A, a) b Outcome.Yielded) :
   CoroutineStep (StmtCo.Sequence A B, a) b Outcome.Yielded
-| IfTrue (cond: DecidableCond n) (then_body: StmtCo)
+| IfTrue (cond: DecidableCond) (then_body: StmtCo)
   (s t: State)
   (hcond : cond.pred s.trace)
   (body_outcome: Outcome)
   (hbody : @CoroutineStep program (then_body, s) t body_outcome) :
   CoroutineStep (StmtCo.If cond then_body, s) t body_outcome
-| IfFalse (cond: DecidableCond n) (then_body: StmtCo)
+| IfFalse (cond: DecidableCond) (then_body: StmtCo)
   (s: State)
   (hcond: ¬(cond.pred s.trace)) :
   CoroutineStep (StmtCo.If cond then_body, s) s Outcome.Completed
-| LoopContinueNormal (cond: DecidableCond n) (body: StmtCo)
+| LoopContinueNormal (cond: DecidableCond) (body: StmtCo)
   (s t u: State)
   (hcond : cond.pred s.trace)
   (rest_outcome : Outcome)
   (hbody : @CoroutineStep program (body, s) t Outcome.Completed)
   (hrest : @CoroutineStep program (StmtCo.Loop cond body, t) u rest_outcome) :
   CoroutineStep (StmtCo.Loop cond body, s) u rest_outcome
-| LoopEarlyYield (cond: DecidableCond n) (body: StmtCo)
+| LoopEarlyYield (cond: DecidableCond) (body: StmtCo)
   (s t: State)
   (hcond : cond.pred s.trace)
   (hbody: @CoroutineStep program (body, s) t Outcome.Yielded) :
   CoroutineStep (StmtCo.Loop cond body, s) t Outcome.Yielded
-| LoopTerminate (cond: DecidableCond n) (body: StmtCo)
+| LoopTerminate (cond: DecidableCond) (body: StmtCo)
   (s: State)
   (hcond : ¬(cond.pred s.trace)) :
   CoroutineStep (StmtCo.Loop cond body, s) s Outcome.Completed
@@ -135,7 +134,7 @@ inductive CoroutineStep {program: @ProgramCo n k} : ((@StmtCo n k) × (@State n)
 
 -- use "direct unrolling" idea as first implementation
 
-def countSuspendsStmt : @StmtExt n → ℕ
+def countSuspendsStmt : StmtExt → ℕ
   | .ShallowInstr _ => 0
   | .Sequence head tail => countSuspendsStmt head + countSuspendsStmt tail
   | .If _ then_body => countSuspendsStmt then_body
@@ -159,8 +158,8 @@ returns:
   proof that number of subroutines created = countSuspends of stmt/stmts
 -/
 
-def splitStmt (stmt: @StmtExt n) (cont: @StmtCo n k) (subr_index: ℕ) (hbound: subr_index + countSuspendsStmt stmt ≤ k) :
-  { result: (@StmtCo n k × List (@StmtCo n k) × ℕ) // result.snd.snd = subr_index + countSuspendsStmt stmt ∧ result.snd.fst.length = countSuspendsStmt stmt } :=
+def splitStmt (stmt: StmtExt) (cont: @StmtCo k) (subr_index: ℕ) (hbound: subr_index + countSuspendsStmt stmt ≤ k) :
+  { result: (@StmtCo k × List (@StmtCo k) × ℕ) // result.snd.snd = subr_index + countSuspendsStmt stmt ∧ result.snd.fst.length = countSuspendsStmt stmt } :=
   match stmt with
   | .ShallowInstr id => ⟨
     (StmtCo.ShallowInstr id, [], subr_index),
@@ -212,8 +211,8 @@ def splitStmt (stmt: @StmtExt n) (cont: @StmtCo n k) (subr_index: ℕ) (hbound: 
       splitStmt body StmtCo.Skip subr_index
         (by simp [countSuspendsStmt] at hbound; assumption)
     let body_stmt_co := body_fake.val.1
-    let transformed_loop : @StmtCo n k := StmtCo.Loop cond body_stmt_co
-    let correct_cont : @StmtCo n k := StmtCo.Sequence transformed_loop cont
+    let transformed_loop : @StmtCo k := StmtCo.Loop cond body_stmt_co
+    let correct_cont : @StmtCo k := StmtCo.Sequence transformed_loop cont
     let ⟨⟨body_stmt_co, body_subrs, body_subr_index⟩, ⟨body_hindex, body_hlen⟩⟩ :=
       splitStmt body correct_cont subr_index
         (by simp [countSuspendsStmt] at hbound; assumption)
@@ -232,18 +231,18 @@ def splitStmt (stmt: @StmtExt n) (cont: @StmtCo n k) (subr_index: ℕ) (hbound: 
       by simp_all [countSuspendsStmt]
     ⟩
 
-def split (orig: @ProgramExt n) : @ProgramCo n (countSuspendsStmt orig.stmt) :=
+def split (orig: ProgramExt) : @ProgramCo (countSuspendsStmt orig.stmt) :=
   let k := countSuspendsStmt orig.stmt
   let ⟨⟨stmts, subrs, _⟩, ⟨_, hlen⟩⟩ :=
-    @splitStmt n k orig.stmt StmtCo.Skip 0 (by simp [k])
-  @ProgramCo.mk n k stmts (subrs) (by simp_all; rfl)
+    @splitStmt k orig.stmt StmtCo.Skip 0 (by simp [k])
+  @ProgramCo.mk k stmts (subrs) (by simp_all; rfl)
 
 -- tests
 namespace tests
 
 -- sugar
 infixr:100 ";\n" => StmtExt.Sequence
-abbrev SI (id: Fin n) := StmtExt.ShallowInstr id
+abbrev SI (id: ℕ) := StmtExt.ShallowInstr id
 
 -- C-style sugar. The condition expression auto-binds `t : List (Fin _)` as the trace.
 --   loop  (cond_expr) { body }
@@ -272,8 +271,8 @@ macro_rules
     `(StmtExt.If { pred := fun $t:ident => $e, comment := some $s } $body)
   | `(suspend) => `(StmtExt.Suspend)
 
-def print_program_ext (program: @ProgramExt n) : IO Unit :=
-  let rec print_stmt_with_indent (stmt: @StmtExt n) (indent: ℕ) : IO Unit :=
+def print_program_ext (program: ProgramExt) : IO Unit :=
+  let rec print_stmt_with_indent (stmt: StmtExt) (indent: ℕ) : IO Unit :=
     do
       match stmt with
       | .ShallowInstr id =>
@@ -298,8 +297,8 @@ def print_program_ext (program: @ProgramExt n) : IO Unit :=
 
   print_stmt_with_indent program.stmt 0
 
-def print_program_co (program: @ProgramCo n k) : IO Unit :=
-  let rec print_stmt_with_indent (stmt: @StmtCo n k) (indent: ℕ) : IO Unit :=
+def print_program_co (program: @ProgramCo k) : IO Unit :=
+  let rec print_stmt_with_indent (stmt: @StmtCo k) (indent: ℕ) : IO Unit :=
     do
       match stmt with
       | .ShallowInstr id =>
@@ -335,7 +334,7 @@ def print_program_co (program: @ProgramCo n k) : IO Unit :=
       print_stmt_with_indent subr 4
       IO.println ""
 
-def test_0 : @StmtExt 5 :=
+def test_0 : StmtExt :=
   SI 0;
   loop "trace.length ≥ 5" (t.length ≥ 5) {
     SI 1;
@@ -349,14 +348,14 @@ def test_0 : @StmtExt 5 :=
 
 #eval print_program_ext ⟨test_0⟩
 
-def test_0_split : @ProgramCo 5 1 := split ⟨test_0⟩
+def test_0_split : @ProgramCo 1 := split ⟨test_0⟩
 
 #eval print_program_co test_0_split
 
 
 -- provide final state + proof that this is correct according to operational semantics above
-def run_stmt_ext (fuel: ℕ) (stmt: @StmtExt n) (initial_state: @State n) :
-  Option {final_state: @State n // StraightLineStep (stmt, initial_state) final_state} :=
+def run_stmt_ext (fuel: ℕ) (stmt: StmtExt) (initial_state: State) :
+  Option {final_state: State // StraightLineStep (stmt, initial_state) final_state} :=
 
   match fuel, stmt with
   | 0, _ => .none
@@ -392,16 +391,16 @@ def run_stmt_ext (fuel: ℕ) (stmt: @StmtExt n) (initial_state: @State n) :
     let pf := StraightLineStep.Suspend initial_state
     .some { val := initial_state, property := pf }
 
-def run_program_ext (fuel: ℕ) (program: @ProgramExt n) (initial_state: @State n) :
-  Option {final_state: @State n // StraightLineStep (program.stmt, initial_state) final_state} :=
+def run_program_ext (fuel: ℕ) (program: ProgramExt) (initial_state: State) :
+  Option {final_state: State // StraightLineStep (program.stmt, initial_state) final_state} :=
   run_stmt_ext fuel program.stmt initial_state
 
-structure ResultCo (program: @ProgramCo n k) (stmt: @StmtCo n k) (initial_state: @State n) where
-  final_state: @State n
+structure ResultCo (program: @ProgramCo k) (stmt: @StmtCo k) (initial_state: State) where
+  final_state: State
   outcome: Outcome
-  pf: @CoroutineStep n k program (stmt, initial_state) final_state outcome
+  pf: @CoroutineStep k program (stmt, initial_state) final_state outcome
 
-def run_stmt_co (fuel: ℕ) (program: @ProgramCo n k) (stmt: @StmtCo n k) (initial_state: @State n) :
+def run_stmt_co (fuel: ℕ) (program: @ProgramCo k) (stmt: @StmtCo k) (initial_state: State) :
   Option (ResultCo program stmt initial_state) :=
   match fuel, stmt with
   | 0, _ => .none
@@ -455,7 +454,7 @@ def run_stmt_co (fuel: ℕ) (program: @ProgramCo n k) (stmt: @StmtCo n k) (initi
     let pf := CoroutineStep.Skip initial_state
     .some { final_state := initial_state, outcome := Outcome.Completed, pf }
 
-def run_program_co (fuel: ℕ) (program: @ProgramCo n k) (initial_state: @State n) :
+def run_program_co (fuel: ℕ) (program: @ProgramCo k) (initial_state: State) :
   Option (ResultCo program program.main initial_state) :=
   run_stmt_co fuel program program.main initial_state
 
@@ -473,16 +472,16 @@ def run_program_co (fuel: ℕ) (program: @ProgramCo n k) (initial_state: @State 
 -- is written between this marker and the next.
 
 -- "count of x after the last occurrence of y"
-def tail_count (t : List (Fin 4)) (x y : Fin 4) : ℕ :=
+def tail_count (t : List ℕ) (x y : ℕ) : ℕ :=
   (t.reverse.takeWhile (· ≠ y)).count x
 
 -- "count of x between the second-to-last and last y"
-def prev_chunk_count (t : List (Fin 4)) (x y : Fin 4) : ℕ :=
+def prev_chunk_count (t : List ℕ) (x y : ℕ) : ℕ :=
   let r := t.reverse
   let after_last := (r.dropWhile (· ≠ y)).tail
   (after_last.takeWhile (· ≠ y)).count x
 
-def factorial : @StmtExt 4 :=
+def factorial : StmtExt :=
   SI 1;          -- seed first round-marker with accumulator = 1 (one '3' below)
   SI 3;          -- f₀ = 1
   loop "outer: i < k" (t.count 1 - 1 < t.count 0) {
@@ -499,7 +498,7 @@ def factorial : @StmtExt 4 :=
     }
   }
 
-def factorial_co : @ProgramCo 4 2 := split ⟨factorial⟩
+def factorial_co : @ProgramCo 2 := split ⟨factorial⟩
 
 def unary_five : List (Fin 4) := [0, 0, 0, 0, 0]
 def five_factorial := run_stmt_ext 100000 factorial ⟨unary_five⟩
@@ -528,8 +527,8 @@ end tests
 -- ==========================================================================
 
 lemma splitStmt_stmt_cont_invariant
-    (stmt : @StmtExt n)
-    (cont₁ cont₂ : @StmtCo n k)
+    (stmt : StmtExt)
+    (cont₁ cont₂ : @StmtCo k)
     (subr_index : ℕ)
     (hindex : subr_index + countSuspendsStmt stmt ≤ k) :
     (splitStmt stmt cont₁ subr_index hindex).val.1 = (splitStmt stmt cont₂ subr_index hindex).val.1 := by
@@ -569,19 +568,19 @@ lemma splitStmt_stmt_cont_invariant
 --    which includes both the part of the straight-line-step following the suspend which ends up at t,
 --    and the continuation which goes from t to u.
 lemma splitStmtSimulation
-    (program : @ProgramCo n k)
-    (stmt : @StmtExt n)
-    (cont : @StmtCo n k)
+    (program : @ProgramCo k)
+    (stmt : StmtExt)
+    (cont : @StmtCo k)
     (subr_index : ℕ)
     (hbound : subr_index + countSuspendsStmt stmt ≤ k)
 
     (s t u : State)
-    (cfg : @StmtExt n × State)
+    (cfg : StmtExt × State)
     (hcfg : cfg = (stmt, s))
     (hrun : StraightLineStep cfg t)
 
-    (stmt_co : @StmtCo n k)
-    (subrs : List (@StmtCo n k))
+    (stmt_co : @StmtCo k)
+    (subrs : List (@StmtCo k))
     (new_subr_index : ℕ)
     (hindex : new_subr_index = subr_index + countSuspendsStmt stmt)
     (hlen : subrs.length = countSuspendsStmt stmt)
@@ -591,10 +590,10 @@ lemma splitStmtSimulation
       program.subroutines[subr_index + i]'(by rw [program.hsubr_count]; rw [hlen] at hi; omega) = subrs[i])
 
     (cont_outcome : Outcome)
-    (hcont : @CoroutineStep n k program (cont, t) u cont_outcome) :
+    (hcont : @CoroutineStep k program (cont, t) u cont_outcome) :
     ∃ outcome,
-    (outcome = Outcome.Completed ∧ @CoroutineStep n k program (stmt_co, s) t outcome) ∨
-    (outcome = Outcome.Yielded ∧ @CoroutineStep n k program (stmt_co, s) u outcome) := by
+    (outcome = Outcome.Completed ∧ @CoroutineStep k program (stmt_co, s) t outcome) ∨
+    (outcome = Outcome.Yielded ∧ @CoroutineStep k program (stmt_co, s) u outcome) := by
   induction hrun generalizing stmt cont subrs subr_index new_subr_index stmt_co s hwell_formed cont_outcome with
   | ShallowInstr id state =>
     -- this case is straightforward, ShallowInstr cannot contain a Suspend, so it's always in case 1
@@ -669,7 +668,7 @@ lemma splitStmtSimulation
     cases B_outcome
     . simp at hB_co
       -- this is true, because if B_outcome is Yielded, then the continuation is "skipped"
-      have hB_cont : @CoroutineStep n k program (StmtCo.Sequence B_stmt_co cont, b) u Outcome.Yielded := by
+      have hB_cont : @CoroutineStep k program (StmtCo.Sequence B_stmt_co cont, b) u Outcome.Yielded := by
         apply CoroutineStep.SequenceEarlyYield B_stmt_co cont b u hB_co
 
       -- then, apply hA's inductive hypothesis, to get that (A, s) coroutine-steps to b and didn't yield
@@ -720,7 +719,7 @@ lemma splitStmtSimulation
 
     . simp at hB_co
       -- otherwise, outcome for (B; cont) depends on outcome of cont
-      have hB_cont : @CoroutineStep n k program (StmtCo.Sequence B_stmt_co cont, b) u cont_outcome := by
+      have hB_cont : @CoroutineStep k program (StmtCo.Sequence B_stmt_co cont, b) u cont_outcome := by
         apply CoroutineStep.SequenceNormal B_stmt_co cont b c u cont_outcome hB_co hcont
 
       -- then, apply hA's inductive hypothesis
@@ -893,7 +892,7 @@ lemma splitStmtSimulation
       -- to make use of inductive hypothesis, we need to prove that (Loop (...); cont) takes t' → u
       have hrest_completed_then_cont :
         @CoroutineStep
-          n k program
+          k program
           (StmtCo.Sequence (StmtCo.Loop cond (splitStmt body StmtCo.Skip subr_index hbound).val.1) cont, t') u cont_outcome := by
            rw [body_invariance]
            exact CoroutineStep.SequenceNormal
@@ -922,7 +921,7 @@ lemma splitStmtSimulation
         exact CoroutineStep.LoopEarlyYield cond body_stmt_co s u hcond hbody_yielded
     . have itwantsthis :
         @CoroutineStep
-          n k program
+          k program
           (StmtCo.Sequence (StmtCo.Loop cond (splitStmt body StmtCo.Skip subr_index hbound).val.1) cont, t') u Outcome.Yielded := by
           rw [body_invariance]; clear body_invariance
           exact CoroutineStep.SequenceEarlyYield _ cont t' u hrest_yielded
@@ -996,15 +995,15 @@ lemma splitStmtSimulation
 
 -- "for all straight-line programs that halt, the final state is equal to the split program run using coroutine semantics"
 theorem splitPreservesSemantics
-  (program : @ProgramExt n)
-  (initial_state: List (Fin n))
-  (final_state: List (Fin n))
+  (program : ProgramExt)
+  (initial_state: List ℕ)
+  (final_state: List ℕ)
   (hrun : StraightLineStep (program.stmt, ⟨initial_state⟩) ⟨final_state⟩)
-  (split_program : @ProgramCo n (countSuspendsStmt program.stmt))
+  (split_program : @ProgramCo (countSuspendsStmt program.stmt))
   (hsplit_program : split_program = split program):
   ∃outcome,
   @CoroutineStep
-    n (countSuspendsStmt program.stmt)
+    (countSuspendsStmt program.stmt)
     split_program
     (split_program.main, ⟨initial_state⟩) ⟨final_state⟩
     outcome := by
