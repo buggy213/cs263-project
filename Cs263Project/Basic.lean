@@ -151,7 +151,7 @@ arguments:
   hbound: a proof that subr_index + countSuspends of stmt/stmts doesn't overflow the index set [k]
 returns:
   tuple of 3 values
-    1. transformed statement / list of statements / list of list of statements
+    1. transformed statement
     2. any created subroutines
     3. updated subroutine index
   proof that updated subroutine index = subr_index + countSuspends of stmt/stmts
@@ -500,7 +500,8 @@ def factorial : StmtExt :=
 
 def factorial_co : @ProgramCo 2 := split ⟨factorial⟩
 
-def unary_five : List (Fin 4) := [0, 0, 0, 0, 0]
+def unary_five : List ℕ := [0, 0, 0, 0, 0]
+def unary_zero : List ℕ := []
 def five_factorial := run_stmt_ext 100000 factorial ⟨unary_five⟩
 def five_factorial_result : ℕ := match five_factorial with
   | .none => 0
@@ -514,6 +515,12 @@ def five_factorial_co_result : ℕ := match five_factorial_co with
 #eval five_factorial_result
 #eval five_factorial_co_result
 #guard five_factorial_result = five_factorial_co_result ∧ five_factorial_result ≠ 0
+
+def zero_factorial := run_stmt_ext 100000 factorial ⟨unary_zero⟩
+def zero_factorial_result : ℕ := match zero_factorial with
+  | .none => 0
+  | .some ⟨final_state, _⟩ => tail_count final_state.trace 3 1
+#eval zero_factorial_result
 
 end tests
 
@@ -601,25 +608,22 @@ lemma splitStmtSimulation
     -- just need to compute through splitStmt to get that stmt_co is `StmtCo.ShallowInstr id`
     refine ⟨Outcome.Completed, ?_⟩
     simp
-    have hstmt : stmt = StmtExt.ShallowInstr id := by
-      subst hindex
-      simp_all only [Prod.mk.injEq]
+
+    -- undo generalizing of hcfg
+    have hstmt : stmt = StmtExt.ShallowInstr id := by simp_all only [Prod.mk.injEq]
     subst stmt
-    have hstate : state = s := by simp_all only [Prod.mk.injEq, true_and]
+    have hstate : state = s := by simp_all only [Prod.mk.injEq]
     subst state
+    clear hcfg
+
     simp [splitStmt] at hsplit
     obtain ⟨stmt_co_is_shallowinstr, _, _⟩ := hsplit
     subst stmt_co
     apply CoroutineStep.ShallowInstr id s
   | Sequence A B a b c hA hB hA_ih hB_ih =>
-    -- prologue here simplifies the context a bit to undo the generalization required for `induction`
-    -- and remove redundant variables
-    have hstmt : stmt = A; B := by
-      subst hindex
-      simp_all only [Prod.mk.injEq, and_imp, forall_apply_eq_imp_iff]
-    have ha : a = s := by
-      subst hindex hstmt
-      simp_all only [Prod.mk.injEq, and_imp, forall_apply_eq_imp_iff, true_and]
+    -- undo generalizing of hcfg
+    have hstmt : stmt = A; B := by simp_all only [Prod.mk.injEq]
+    have ha : a = s := by simp_all only [Prod.mk.injEq]
     subst a
     subst stmt
     clear hcfg
@@ -633,14 +637,15 @@ lemma splitStmtSimulation
     rename_i A_result A_stmt_co A_subrs A_subr_index A_hindex A_hlen A_heq
     clear A_result B_result
 
-    have hsubrs : subrs = B_subrs ++ A_subrs := by
-      subst hindex
-      simp_all only [Prod.mk.injEq, and_imp, forall_apply_eq_imp_iff, Subtype.mk.injEq]
+    have hsubrs : subrs = B_subrs ++ A_subrs := by simp_all only [Prod.mk.injEq, Subtype.mk.injEq]
     subst subrs
 
     -- apply hB's inductive hypothesis first, to get that (B, b) coroutine-steps to c and didn't yield
     -- or coroutine-steps to u by yielding
-    have hB_app := hB_ih
+    have hB_app :
+      ∃outcome,
+      outcome = Outcome.Completed ∧ CoroutineStep (B_stmt_co, b) c outcome
+      ∨ outcome = Outcome.Yielded ∧ CoroutineStep (B_stmt_co, b) u outcome := hB_ih
       B cont subr_index
       (by simp [countSuspendsStmt] at hbound; omega)
       b (by rfl)
@@ -703,17 +708,13 @@ lemma splitStmtSimulation
       . simp at hA_co
         refine ⟨Outcome.Yielded, ?_⟩
         simp
-        have stmt_co_is_seq : stmt_co = .Sequence A_stmt_co B_stmt_co := by
-          subst hindex B_hindex A_hindex
-          simp_all only [Subtype.mk.injEq, Prod.mk.injEq, true_and]
+        have stmt_co_is_seq : stmt_co = .Sequence A_stmt_co B_stmt_co := by simp_all only [Subtype.mk.injEq, Prod.mk.injEq]
         rw [stmt_co_is_seq]
         apply CoroutineStep.SequenceEarlyYield A_stmt_co B_stmt_co s u hA_co
       . simp at hA_co
         refine ⟨Outcome.Yielded, ?_⟩
         simp
-        have stmt_co_is_seq : stmt_co = .Sequence A_stmt_co B_stmt_co := by
-          subst hindex B_hindex A_hindex
-          simp_all only [Subtype.mk.injEq, Prod.mk.injEq, true_and]
+        have stmt_co_is_seq : stmt_co = .Sequence A_stmt_co B_stmt_co := by simp_all only [Subtype.mk.injEq, Prod.mk.injEq]
         rw [stmt_co_is_seq]
         apply CoroutineStep.SequenceNormal A_stmt_co B_stmt_co s b u Outcome.Yielded hA_co hB_co
 
@@ -723,8 +724,8 @@ lemma splitStmtSimulation
         apply CoroutineStep.SequenceNormal B_stmt_co cont b c u cont_outcome hB_co hcont
 
       -- then, apply hA's inductive hypothesis
-      simp at A_hindex B_hindex B_hlen
-      simp [countSuspendsStmt] at hbound hindex
+      simp at A_hindex A_hlen B_hindex B_hlen
+      simp [countSuspendsStmt] at hbound hindex hlen
       have hA_app := hA_ih
         A (StmtCo.Sequence B_stmt_co cont) B_subr_index
         (by
@@ -753,29 +754,24 @@ lemma splitStmtSimulation
       . simp at hA_co
         refine ⟨Outcome.Yielded, ?_⟩
         simp
-        have stmt_co_is_seq : stmt_co = .Sequence A_stmt_co B_stmt_co := by
-          subst hindex B_hindex A_hindex
-          simp_all only [Subtype.mk.injEq, Prod.mk.injEq, true_and]
+        have stmt_co_is_seq : stmt_co = .Sequence A_stmt_co B_stmt_co := by simp_all only [Subtype.mk.injEq, Prod.mk.injEq]
         rw [stmt_co_is_seq]
         apply CoroutineStep.SequenceEarlyYield A_stmt_co B_stmt_co s u hA_co
       . simp at hA_co
         refine ⟨Outcome.Completed, ?_⟩
         simp
-        have stmt_co_is_seq : stmt_co = .Sequence A_stmt_co B_stmt_co := by
-          subst hindex B_hindex A_hindex
-          simp_all only [Subtype.mk.injEq, Prod.mk.injEq, true_and]
+        have stmt_co_is_seq : stmt_co = .Sequence A_stmt_co B_stmt_co := by simp_all only [Subtype.mk.injEq, Prod.mk.injEq]
         rw [stmt_co_is_seq]
         apply CoroutineStep.SequenceNormal A_stmt_co B_stmt_co s b c Outcome.Completed hA_co hB_co
 
 
 
   | IfTrue cond body s' t' hcond hbody hbody_ih =>
+    -- undo generalizing of hcfg
     have hstmt : stmt = StmtExt.If cond body := by
-      subst hindex
-      simp_all only [Prod.mk.injEq, and_imp, forall_apply_eq_imp_iff]
+      simp_all only [Prod.mk.injEq]
     have hs' : s' = s := by
-      subst hindex hstmt
-      simp_all only [Prod.mk.injEq, and_imp, forall_apply_eq_imp_iff, true_and]
+      simp_all only [Prod.mk.injEq]
     subst s'
     subst stmt
     clear hcfg
@@ -792,16 +788,13 @@ lemma splitStmtSimulation
       body_stmt_co body_subrs body_subr_index
       body_hindex body_hlen body_heq
       (by
-        have body_subrs_is_subrs : body_subrs = subrs := by
-          subst hindex
-          simp_all only [Prod.mk.injEq, and_imp, forall_apply_eq_imp_iff, Subtype.mk.injEq]
+        have body_subrs_is_subrs : body_subrs = subrs := by simp_all only [Prod.mk.injEq, Subtype.mk.injEq]
         subst body_subrs
         exact hwell_formed)
       cont_outcome hcont
     clear hbody_ih
 
     have stmt_co_is_if : stmt_co = StmtCo.If cond body_stmt_co := by
-      subst hindex
       simp_all only [Subtype.mk.injEq, Prod.mk.injEq]
 
     obtain ⟨body_outcome, hbody_co⟩ := hbody_ih_app
@@ -823,28 +816,28 @@ lemma splitStmtSimulation
   | IfFalse cond body s' hcond =>
     refine ⟨Outcome.Completed, ?_⟩
     simp
-    have hstmt : stmt = StmtExt.If cond body := by
-      subst hindex
-      simp_all only [Prod.mk.injEq]
-    subst stmt
+
+    -- undo generalizing of hcfg
+    have hstmt : stmt = StmtExt.If cond body := by simp_all only [Prod.mk.injEq]
     have hs' : s' = s := by simp_all only [Prod.mk.injEq, true_and]
+    subst stmt
     subst s'
+    clear hcfg
+
     simp [splitStmt] at hsplit
     split at hsplit
     rename StmtCo => body_stmt_co
     have stmt_co_is_if : stmt_co = StmtCo.If cond body_stmt_co := by
-      subst hindex
       simp_all only [Subtype.mk.injEq, Prod.mk.injEq]
     subst stmt_co
     apply CoroutineStep.IfFalse
     exact hcond
   | LoopContinue cond body s' t' u' hcond hbody hrest hbody_ih hrest_ih =>
+    -- undo generalizing of hcfg
     have hstmt : stmt = StmtExt.Loop cond body := by
-      subst hindex
-      simp_all only [Prod.mk.injEq, and_imp, forall_apply_eq_imp_iff]
+      simp_all only [Prod.mk.injEq]
     have hs' : s' = s := by
-      subst hindex hstmt
-      simp_all only [Prod.mk.injEq, and_imp, forall_apply_eq_imp_iff, true_and]
+      simp_all only [Prod.mk.injEq]
     subst s'
     subst stmt
     clear hcfg
@@ -862,25 +855,24 @@ lemma splitStmtSimulation
     clear body_result
 
     have stmt_co_is_loop : stmt_co = StmtCo.Loop cond body_stmt_co := by
-      subst hindex
       simp_all only [Prod.mk.injEq, Subtype.mk.injEq]
     subst stmt_co
     have subrs_is_body_subrs : subrs = body_subrs := by
-      subst hindex
       simp_all only [Prod.mk.injEq, and_imp, forall_apply_eq_imp_iff, Subtype.mk.injEq, true_and]
     subst subrs
 
+
+    generalize hdummy_body_co : (splitStmt body StmtCo.Skip subr_index hbound).val.1 = dummy_body_co
+    rw [hdummy_body_co] at body_heq
     have body_invariance :
-      (splitStmt body StmtCo.Skip subr_index
-        (by simp [countSuspendsStmt] at hbound; assumption)).val.1
-        = body_stmt_co := by
+      dummy_body_co = body_stmt_co := by
       have split_invariance := splitStmt_stmt_cont_invariant
         body
         StmtCo.Skip
-        (StmtCo.Sequence (StmtCo.Loop cond (splitStmt body StmtCo.Skip subr_index hbound).val.1) cont)
+        (StmtCo.Sequence (StmtCo.Loop cond dummy_body_co) cont)
         subr_index
         hbound
-      rw [split_invariance]
+      rw [←hdummy_body_co, split_invariance]
       grind
 
 
@@ -893,7 +885,7 @@ lemma splitStmtSimulation
       have hrest_completed_then_cont :
         @CoroutineStep
           k program
-          (StmtCo.Sequence (StmtCo.Loop cond (splitStmt body StmtCo.Skip subr_index hbound).val.1) cont, t') u cont_outcome := by
+          (StmtCo.Sequence (StmtCo.Loop cond dummy_body_co) cont, t') u cont_outcome := by
            rw [body_invariance]
            exact CoroutineStep.SequenceNormal
             _ cont t' u' u
@@ -901,7 +893,7 @@ lemma splitStmtSimulation
 
       have hbody_ih_app := hbody_ih
         body
-        (StmtCo.Sequence (StmtCo.Loop cond (splitStmt body StmtCo.Skip subr_index hbound).val.1) cont)
+        (StmtCo.Sequence (StmtCo.Loop cond dummy_body_co) cont)
         subr_index
         (by simp [countSuspendsStmt] at hbound; omega)
         s (by rfl)
@@ -919,21 +911,21 @@ lemma splitStmtSimulation
           hcond Outcome.Completed hbody_completed hrest_completed
       . refine ⟨Outcome.Yielded, Or.inr ⟨rfl, ?_⟩⟩
         exact CoroutineStep.LoopEarlyYield cond body_stmt_co s u hcond hbody_yielded
-    . have itwantsthis :
+    . have hrest_yielded_skip_cont :
         @CoroutineStep
           k program
-          (StmtCo.Sequence (StmtCo.Loop cond (splitStmt body StmtCo.Skip subr_index hbound).val.1) cont, t') u Outcome.Yielded := by
+          (StmtCo.Sequence (StmtCo.Loop cond dummy_body_co) cont, t') u Outcome.Yielded := by
           rw [body_invariance]; clear body_invariance
           exact CoroutineStep.SequenceEarlyYield _ cont t' u hrest_yielded
 
-      -- Apply hbody_ih with cont_outcome = Yielded (NOT the outer cont_outcome).
+      -- Apply hbody_ih with cont_outcome = Yielded.
       have hbody_ih_app := hbody_ih body _
         subr_index (by simp [countSuspendsStmt] at hbound; omega)
         s (by rfl)
         body_stmt_co body_subrs body_subr_index
         body_hindex body_hlen body_heq
         hwell_formed
-        Outcome.Yielded itwantsthis
+        Outcome.Yielded hrest_yielded_skip_cont
       clear hbody_ih
 
       obtain ⟨body_outcome, hbody_co⟩ := hbody_ih_app
@@ -951,17 +943,18 @@ lemma splitStmtSimulation
   | LoopTerminate cond body s' hcond =>
     refine ⟨Outcome.Completed, ?_⟩
     simp
+
     have hstmt : stmt = StmtExt.Loop cond body := by
-      subst hindex
       simp_all only [Prod.mk.injEq]
     subst stmt
-    have hs' : s' = s := by simp_all only [Prod.mk.injEq, true_and]
+    have hs' : s' = s := by simp_all only [Prod.mk.injEq]
     subst s'
+    clear hcfg
+
     simp [splitStmt] at hsplit
     split at hsplit
     rename StmtCo => body_stmt_co
     have stmt_co_is_if : stmt_co = StmtCo.Loop cond body_stmt_co := by
-      subst hindex
       simp_all only [Subtype.mk.injEq, Prod.mk.injEq]
     subst stmt_co
     apply CoroutineStep.LoopTerminate
@@ -969,15 +962,18 @@ lemma splitStmtSimulation
   | Suspend st =>
     refine ⟨Outcome.Yielded, ?_⟩
     simp
+
+    -- undo generalizing of hcfg
     have st_is_s : st = s := by
       subst hindex
       simp_all only [Prod.mk.injEq]
     subst st
     have hstmt : stmt = StmtExt.Suspend := by
       subst hindex
-      simp_all only [Prod.mk.injEq, and_true]
+      simp_all only [Prod.mk.injEq]
     subst stmt
     clear hcfg
+
     simp [splitStmt] at hsplit
     obtain ⟨stmt_co_is_yield, subrs_is_cont, subr_index_inc⟩ := hsplit
     subst stmt_co
