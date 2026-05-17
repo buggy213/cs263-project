@@ -3,6 +3,8 @@
 #title()
 #author
 
+Link to #link("https://github.com/buggy213/cs263-project/")[GitHub]
+
 = Motivation
 The goal of this project was to investigate a basic formalization of a stackless, asymmetric coroutine splitting transform inspired by the coroutine system from the LuisaCompute project @luisarender-coro. This transform takes an ordinary program annotated with special `suspend` markers and converts it into a set of cooperatively-scheduled coroutines. In spirit, this is similar to the async functionality in many programming languages, but is more low-level. It would be possible to build generators using this transform, as well as async / await (each `.await` is a suspension point). 
 
