@@ -862,8 +862,7 @@ lemma splitStmtSimulation
     subst subrs
 
 
-    generalize hdummy_body_co : (splitStmt body StmtCo.Skip subr_index hbound).val.1 = dummy_body_co
-    rw [hdummy_body_co] at body_heq
+    generalize hdummy_body_co : (splitStmt body StmtCo.Skip subr_index hbound).val.1 = dummy_body_co at body_heq
     have body_invariance :
       dummy_body_co = body_stmt_co := by
       have split_invariance := splitStmt_stmt_cont_invariant
