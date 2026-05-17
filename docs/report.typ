@@ -3,6 +3,7 @@
 #title()
 #author
 
+#show link: set text(fill: blue)
 Link to #link("https://github.com/buggy213/cs263-project/")[GitHub]
 
 = Motivation
